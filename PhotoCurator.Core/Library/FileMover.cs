@@ -73,7 +73,7 @@ public static class FileMover
     }
 
     /// <summary>"IMG_1.HEIC" if free in <paramref name="dir"/>, else "IMG_1 (1).HEIC", "IMG_1 (2).HEIC"…, checking companions too.</summary>
-    static string FreeName(string dir, string photoName, IReadOnlyList<string> companions)
+    internal static string FreeName(string dir, string photoName, IReadOnlyList<string> companions)
     {
         var stem = Path.GetFileNameWithoutExtension(photoName);
         var ext = Path.GetExtension(photoName);
@@ -87,7 +87,7 @@ public static class FileMover
         throw new CuratorException($"Couldn't find a free name for {photoName}.", 409);
     }
 
-    static string RenameCompanion(string companion, string oldPhotoName, string newPhotoName)
+    internal static string RenameCompanion(string companion, string oldPhotoName, string newPhotoName)
     {
         if (oldPhotoName.Equals(newPhotoName, StringComparison.Ordinal)) return companion;
         if (companion.StartsWith(oldPhotoName, StringComparison.OrdinalIgnoreCase))

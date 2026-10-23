@@ -20,12 +20,20 @@ sealed class TempFolder : IDisposable
         return full;
     }
 
-    public string Photo(string rel, int width = 320, int height = 240, string? taken = null, Orientation orientation = Orientation.TopLeft, bool gps = false)
+    public string Photo(string rel, int width = 320, int height = 240, string? taken = null, Orientation orientation = Orientation.TopLeft, bool gps = false, int quality = 90)
     {
         var full = this[rel];
         Directory.CreateDirectory(System.IO.Path.GetDirectoryName(full)!);
-        TestImages.Jpeg(full, width, height, taken, orientation, gps);
+        TestImages.Jpeg(full, width, height, taken, orientation, gps, quality);
         return full;
+    }
+
+    public string Copy(string fromRel, string toRel)
+    {
+        var to = this[toRel];
+        Directory.CreateDirectory(System.IO.Path.GetDirectoryName(to)!);
+        File.Copy(this[fromRel], to);
+        return to;
     }
 
     /// <summary>Every file under the folder (relative path → SHA-256), to prove originals are untouched.</summary>
@@ -49,7 +57,7 @@ static class TestImages
     /// A small JPEG whose left half is red and right half blue, so tests can tell whether it was rotated.
     /// <paramref name="taken"/> is EXIF "yyyy:MM:dd HH:mm:ss".
     /// </summary>
-    public static void Jpeg(string path, int width, int height, string? taken = null, Orientation orientation = Orientation.TopLeft, bool gps = false)
+    public static void Jpeg(string path, int width, int height, string? taken = null, Orientation orientation = Orientation.TopLeft, bool gps = false, int quality = 90)
     {
         using var image = new MagickImage(MagickColors.Blue, (uint)width, (uint)height);
         new ImageMagick.Drawing.Drawables()
@@ -70,7 +78,7 @@ static class TestImages
         }
         image.SetProfile(exif);
         image.Orientation = orientation;
-        image.Quality = 90;
+        image.Quality = (uint)quality;
         image.Write(path, MagickFormat.Jpeg);
     }
 }

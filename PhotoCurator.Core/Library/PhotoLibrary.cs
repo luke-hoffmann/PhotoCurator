@@ -163,25 +163,7 @@ public sealed class PhotoLibrary : IDisposable
 
             try
             {
-                foreach (var photo in photos)
-                {
-                    var full = FullPath(photo.Id);
-                    if (Path.GetDirectoryName(full)!.Equals(destination, PathGuard.Comparison)) continue;
-
-                    if (!photo.HasSidecar)
-                    {
-                        var sidecarPath = full + PhotoFiles.SidecarExtension;
-                        var data = new SidecarData { Date = Sidecar.FormatDate(TakenDate(full)) };
-                        var text = Sidecar.Serialize(data);
-                        Sidecar.WriteText(sidecarPath, text);
-                        undo.CreatedSidecars.Add(new SidecarUndo.Change { Path = sidecarPath, Before = null, After = text });
-                    }
-
-                    var moves = FileMover.MovePhoto(full, destination);
-                    if (moves.Count == 0) continue;
-                    undo.Moves.Add(moves);
-                    moved[photo.Id] = PathGuard.ToRelative(Root, moves[0].To);
-                }
+                MoveInto(photos, destination, undo, moved);
             }
             finally
             {
@@ -192,6 +174,100 @@ public sealed class PhotoLibrary : IDisposable
 
             var message = moved.Count == 0 ? "Already in that folder" : $"Moved {Count(moved.Count)} to {DisplayFolder(destRel)}";
             return new OperationResult(message, moved, destRel);
+        }
+    }
+
+    /// <summary>
+    /// Keeps one photo of each group and sets the others aside in "Duplicates set aside". Before that, the kept photo
+    /// takes over what the others knew: their tags are added, and their caption, alt text and description fill in
+    /// whatever the kept photo doesn't have yet. One undo step for everything.
+    /// </summary>
+    public OperationResult SetAsideDuplicates(IReadOnlyList<(string Keep, IReadOnlyList<string> Others)> groups)
+    {
+        if (groups.Count == 0) throw new CuratorException("Nothing to set aside.");
+        lock (_sync)
+        {
+            var undo = new CompositeUndo { Description = "" };
+            var setAside = 0;
+            var moved = new Dictionary<string, string>(PathGuard.Comparer);
+            try
+            {
+                var folder = Path.Combine(Root, DuplicateFinder.SetAsideFolder);
+                if (!Directory.Exists(folder))
+                {
+                    Directory.CreateDirectory(folder);
+                    undo.Parts.Add(new FolderCreateUndo { Description = "", Path = folder });
+                }
+
+                foreach (var (keepId, otherIds) in groups)
+                {
+                    var keep = Get(keepId);
+                    var others = Resolve(otherIds.Where(id => !PathGuard.Comparer.Equals(id, keep.Id)).ToList());
+                    if (others.Count == 0) continue;
+
+                    var merge = new SidecarUndo { Description = "" };
+                    var donors = others.Where(o => o.Sidecar is not null).Select(o => o.Sidecar!).ToList();
+                    if (donors.Count > 0)
+                    {
+                        EditSidecar(keep, merge, data =>
+                        {
+                            foreach (var donor in donors)
+                            {
+                                foreach (var tag in donor.Tags) if (!data.Tags.Contains(tag)) data.Tags.Add(tag);
+                                if (data.Caption.Length == 0) data.Caption = donor.Caption;
+                                if (data.Alt.Length == 0) data.Alt = donor.Alt;
+                                if (data.Description.Length == 0) data.Description = donor.Description;
+                            }
+                        });
+                    }
+                    undo.Parts.Add(merge);
+
+                    var move = new MoveUndo { Description = "" };
+                    undo.Parts.Add(move);
+                    MoveInto(others, folder, move, moved);
+                    setAside += others.Count;
+                }
+            }
+            finally
+            {
+                undo.Description = $"Set aside {Count(setAside)} as duplicates";
+                if (undo.Parts.Count > 0) _undo.Push(undo);
+                Refresh();
+            }
+            return new OperationResult($"Set aside {Count(setAside)} in \"{DuplicateFinder.SetAsideFolder}\"", moved, DuplicateFinder.SetAsideFolder);
+        }
+    }
+
+    /// <summary>Records an import (done by <see cref="Media.Importer"/>) so Ctrl+Z can take it back.</summary>
+    internal void RecordImport(ImportUndo undo)
+    {
+        lock (_sync)
+        {
+            if (undo.Files.Count > 0 || undo.CreatedFolders.Count > 0) _undo.Push(undo);
+        }
+        Refresh();
+    }
+
+    void MoveInto(IEnumerable<PhotoEntry> photos, string destination, MoveUndo undo, Dictionary<string, string> moved)
+    {
+        foreach (var photo in photos)
+        {
+            var full = FullPath(photo.Id);
+            if (Path.GetDirectoryName(full)!.Equals(destination, PathGuard.Comparison)) continue;
+
+            if (!photo.HasSidecar)
+            {
+                var sidecarPath = full + PhotoFiles.SidecarExtension;
+                var data = new SidecarData { Date = Sidecar.FormatDate(TakenDate(full)) };
+                var text = Sidecar.Serialize(data);
+                Sidecar.WriteText(sidecarPath, text);
+                undo.CreatedSidecars.Add(new SidecarUndo.Change { Path = sidecarPath, Before = null, After = text });
+            }
+
+            var moves = FileMover.MovePhoto(full, destination);
+            if (moves.Count == 0) continue;
+            undo.Moves.Add(moves);
+            moved[photo.Id] = PathGuard.ToRelative(Root, moves[0].To);
         }
     }
 

@@ -5,7 +5,7 @@ namespace PhotoCurator.Core.Library;
 /// <summary>Something the app did that it can take back. Entries are applied newest first.</summary>
 public abstract class UndoEntry
 {
-    public required string Description { get; init; }
+    public required string Description { get; set; }
     public DateTime At { get; set; } = DateTime.UtcNow;
 
     /// <summary>Takes the change back. Returns a note about anything that had to be left alone, or null.</summary>
@@ -98,6 +98,56 @@ public sealed class FolderRenameUndo : UndoEntry
         }
         Directory.Move(To, From);
         return null;
+    }
+}
+
+/// <summary>Several steps that happened as one action (e.g. merge tags into the kept photo, then set the others aside).</summary>
+public sealed class CompositeUndo : UndoEntry
+{
+    public List<UndoEntry> Parts { get; } = new();
+
+    public override string? Undo()
+    {
+        var notes = new List<string>();
+        foreach (var part in Enumerable.Reverse(Parts))
+        {
+            if (part.Undo() is { } note) notes.Add(note);
+        }
+        return notes.Count == 0 ? null : string.Join(" ", notes);
+    }
+}
+
+/// <summary>
+/// An import: removes the copies it made (only ones still exactly as imported) and the folders it created if they're
+/// empty again. The download it came from was never touched.
+/// </summary>
+public sealed class ImportUndo : UndoEntry
+{
+    public sealed record CopiedFile(string Path, long Size, long Modified);
+
+    public List<CopiedFile> Files { get; } = new();
+    /// <summary>Folders the import created, outermost first.</summary>
+    public List<string> CreatedFolders { get; } = new();
+
+    public override string? Undo()
+    {
+        var kept = 0;
+        foreach (var file in Files)
+        {
+            var info = new FileInfo(file.Path);
+            if (!info.Exists) continue;
+            if (info.Length != file.Size || info.LastWriteTimeUtc.Ticks != file.Modified)
+            {
+                kept++;
+                continue;
+            }
+            info.Delete();
+        }
+        foreach (var folder in Enumerable.Reverse(CreatedFolders))
+        {
+            if (Directory.Exists(folder) && !Directory.EnumerateFileSystemEntries(folder).Any()) Directory.Delete(folder);
+        }
+        return kept == 0 ? null : $"{kept} imported file{(kept == 1 ? " was" : "s were")} changed since and kept.";
     }
 }
 
