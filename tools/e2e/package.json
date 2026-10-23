@@ -1,0 +1,8 @@
+{
+  "name": "photocurator-e2e",
+  "private": true,
+  "type": "module",
+  "description": "Browser tests of the app UI, run against the real server (tools/DevHost).",
+  "scripts": { "test": "node curator.e2e.mjs" },
+  "devDependencies": { "playwright-core": "1.56.1" }
+}

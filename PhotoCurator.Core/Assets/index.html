@@ -1,1 +1,150 @@
-<!doctype html><title>PhotoCurator</title>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PhotoCurator</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <!-- Shown until a folder is open. -->
+  <main id="welcome" class="welcome" hidden>
+    <div class="welcome-card">
+      <img class="welcome-mark" src="favicon.svg" alt="" width="56" height="56">
+      <h1>PhotoCurator</h1>
+      <p class="muted">Sort, tag and caption the photos in any folder. Everything stays in that folder, as plain files.</p>
+      <button id="welcomeOpen" class="button primary large" type="button">Open a folder…</button>
+      <form id="welcomePathForm" class="path-form">
+        <label for="welcomePath" class="muted small">or paste a folder path</label>
+        <div class="path-row">
+          <input id="welcomePath" class="input" type="text" spellcheck="false" autocomplete="off" placeholder="C:\Users\you\Pictures\Photos">
+          <button class="button" type="submit">Open</button>
+        </div>
+      </form>
+      <section id="recentSection" hidden>
+        <h2 class="section-label">Recent</h2>
+        <ul id="recentList" class="recent-list"></ul>
+      </section>
+    </div>
+  </main>
+
+  <!-- The library: top bar, sidebar, grid. -->
+  <div id="app" class="app" hidden>
+    <header class="topbar">
+      <button id="folderButton" class="folder-button" type="button" title="Open another folder">
+        <img src="favicon.svg" alt="" width="22" height="22">
+        <span id="rootName" class="root-name"></span>
+        <span class="chevron" data-icon="chevronDown"></span>
+      </button>
+      <label class="search">
+        <span data-icon="search"></span>
+        <input id="search" type="search" placeholder="Search captions, tags and file names" spellcheck="false" autocomplete="off">
+      </label>
+      <div class="topbar-right">
+        <span id="saveState" class="save-state" aria-live="polite"></span>
+        <select id="sort" class="select" title="Sort order">
+          <option value="name">Sort: Name</option>
+          <option value="date">Sort: Date taken</option>
+        </select>
+        <label class="size-slider" title="Thumbnail size (Ctrl + / Ctrl −)">
+          <span data-icon="gridSmall"></span>
+          <input id="tileSize" type="range" min="120" max="360" step="10" value="200">
+          <span data-icon="gridLarge"></span>
+        </label>
+        <button id="undoButton" class="button icon-button" type="button" title="Undo (Ctrl+Z)" disabled><span data-icon="undo"></span></button>
+      </div>
+    </header>
+
+    <nav id="sidebar" class="sidebar" aria-label="Library"></nav>
+
+    <main class="content">
+      <div class="content-head">
+        <div class="content-title">
+          <h1 id="viewTitle"></h1>
+          <span id="viewCount" class="muted"></span>
+        </div>
+        <div class="content-tools">
+          <label id="subfoldersToggle" class="checkbox" hidden>
+            <input id="subfolders" type="checkbox" checked> Include subfolders
+          </label>
+          <button id="selectAll" class="button subtle" type="button">Select all</button>
+        </div>
+      </div>
+      <div id="grid" class="grid-scroll" tabindex="0" aria-label="Photos"></div>
+      <div id="emptyState" class="empty-state" hidden></div>
+    </main>
+
+    <div id="selectionBar" class="selection-bar" hidden>
+      <span id="selectionCount" class="selection-count"></span>
+      <button class="button bar-button" type="button" data-action="tag"><span data-icon="tag"></span>Tags…<kbd>T</kbd></button>
+      <button class="button bar-button" type="button" data-action="move"><span data-icon="move"></span>Move to…<kbd>M</kbd></button>
+      <button class="button bar-button" type="button" data-action="caption"><span data-icon="caption"></span>Caption…<kbd>C</kbd></button>
+      <button class="button icon-button bar-close" type="button" data-action="clear" title="Clear selection (Esc)"><span data-icon="close"></span></button>
+    </div>
+  </div>
+
+  <!-- Full-window photo with its caption, date, tags and folder. -->
+  <section id="detail" class="detail" hidden aria-label="Photo">
+    <div class="detail-stage">
+      <img id="detailImage" alt="">
+      <div id="detailUnavailable" class="detail-unavailable" hidden>This file can't be shown.</div>
+      <button id="detailPrev" class="stage-nav prev" type="button" title="Previous (←)"><span data-icon="chevronLeft"></span></button>
+      <button id="detailNext" class="stage-nav next" type="button" title="Next (→)"><span data-icon="chevronRight"></span></button>
+      <div class="stage-footer">
+        <span id="detailPosition"></span>
+        <span class="stage-hint">← → browse · Enter caption · T tag · Esc back</span>
+      </div>
+    </div>
+    <aside class="detail-panel">
+      <div class="panel-head">
+        <div class="panel-title">
+          <h2 id="detailName"></h2>
+          <span id="detailMeta" class="muted small"></span>
+        </div>
+        <button id="detailClose" class="button icon-button" type="button" title="Back to grid (Esc)"><span data-icon="close"></span></button>
+      </div>
+      <div id="detailError" class="notice danger" hidden></div>
+      <form id="detailForm" class="panel-form" autocomplete="off">
+        <label class="field">
+          <span class="field-label">Caption</span>
+          <textarea id="fieldCaption" rows="2" placeholder="Add a caption…" spellcheck="true"></textarea>
+        </label>
+        <label class="field">
+          <span class="field-label">Date taken <span id="dateSource" class="muted small"></span></span>
+          <input id="fieldDate" class="input" type="datetime-local" step="1">
+        </label>
+        <div class="field">
+          <span class="field-label">Tags</span>
+          <div id="fieldTags"></div>
+        </div>
+        <div class="field">
+          <span class="field-label">Folder</span>
+          <button id="fieldFolder" class="button folder-field" type="button"><span data-icon="folder"></span><span id="fieldFolderName"></span></button>
+        </div>
+        <details id="moreFields" class="more">
+          <summary>More: alt text and description</summary>
+          <label class="field">
+            <span class="field-label">Alt text <span class="muted small">for screen readers; the caption is used if empty</span></span>
+            <input id="fieldAlt" class="input" type="text">
+          </label>
+          <label class="field">
+            <span class="field-label">Description <span class="muted small">markdown</span></span>
+            <textarea id="fieldDescription" rows="5"></textarea>
+          </label>
+        </details>
+      </form>
+      <div class="panel-foot">
+        <span id="detailSaveState" class="save-state"></span>
+        <button id="detailReveal" class="button subtle" type="button" hidden><span data-icon="reveal"></span>Show in Explorer</button>
+      </div>
+    </aside>
+  </section>
+
+  <div id="popover" class="popover" hidden></div>
+  <div id="dialogLayer" class="dialog-layer" hidden></div>
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+  <div id="menu" class="menu" hidden role="menu"></div>
+</body>
+</html>
