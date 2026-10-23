@@ -305,12 +305,18 @@ textarea { resize: vertical; line-height: 1.45; }
 /* ---------- detail ---------- */
 
 .detail {
-  position: fixed; inset: 0; z-index: 30; display: grid; grid-template-columns: minmax(0, 1fr) 380px; background: #111311;
+  position: fixed; inset: 0; z-index: 30; display: grid; grid-template-columns: minmax(0, 1fr) 380px;
+  grid-template-rows: minmax(0, 1fr); background: #111311;
   animation: fade 120ms ease-out;
 }
 @keyframes fade { from { opacity: 0; } }
-.detail-stage { position: relative; min-width: 0; min-height: 0; display: grid; place-items: center; padding: 28px 64px 52px; }
-.detail-stage img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 4px; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5); }
+/* The frame has a definite size (a grid row sized by its content doesn't), so the whole picture always fits,
+   whatever its size and the window's. */
+.detail-stage { position: relative; min-width: 0; min-height: 0; }
+.stage-frame { position: absolute; inset: 28px 64px 52px; display: flex; align-items: center; justify-content: center; }
+/* Fills the frame and letterboxes: the cached thumbnail shown first and the full photo that replaces it land at the
+   same size, so the picture sharpens in place instead of jumping. */
+.stage-frame img { display: block; width: 100%; height: 100%; object-fit: contain; }
 .detail-unavailable { color: #9aa199; }
 .stage-nav {
   position: absolute; top: 50%; transform: translateY(-50%); width: 44px; height: 64px; border: 0; border-radius: 10px;
@@ -366,9 +372,9 @@ textarea { resize: vertical; line-height: 1.45; }
 
 /* ---------- toasts ---------- */
 
-/* Top right, clear of the selection bar; over the photo (bottom left) while the detail view is open. */
+/* Top right, clear of the selection bar; top left of the photo area while the photo view is open. */
 .toasts { position: fixed; right: 22px; top: 68px; z-index: 70; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; pointer-events: none; }
-.detail:not([hidden]) ~ .toasts { right: auto; top: auto; left: 22px; bottom: 44px; align-items: flex-start; }
+.detail:not([hidden]) ~ .toasts { right: auto; left: 22px; top: 16px; align-items: flex-start; }
 .toast {
   pointer-events: auto; display: flex; align-items: center; gap: 12px; max-width: 460px; padding: 10px 10px 10px 14px;
   background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--green); border-radius: 10px; box-shadow: var(--shadow);

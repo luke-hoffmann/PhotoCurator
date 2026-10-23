@@ -233,6 +233,48 @@ try {
     await page.click('.dialog >> text=Done');
   });
 
+  await test('the photo view shows the whole photo, however big', async () => {
+    const big = path.join(COPY, 'Big photos');
+    fs.mkdirSync(big);
+    fs.writeFileSync(path.join(big, 'portrait.jpg'), await makeJpeg(31, 3000, 4000));
+    fs.writeFileSync(path.join(big, 'panorama.jpg'), await makeJpeg(32, 6000, 2000));
+    await until(async () => (await page.locator('.side-row[data-folder="Big photos"]').count()) === 1, 'the new folder');
+    for (const [width, height] of [[1280, 800], [1920, 1080]]) {
+      await page.setViewportSize({ width, height });
+      await page.click('.side-row[data-folder="Big photos"]');
+      for (const [name, w, h] of [['panorama.jpg', 6000, 2000], ['portrait.jpg', 3000, 4000]]) {
+        await page.locator('.tile', { hasText: name }).click();
+        await page.waitForSelector(`#detailName >> text=${name}`);
+        await until(() => page.evaluate(() => {
+          const img = document.getElementById('detailImage');
+          return img.src.includes('/api/image') && img.complete && img.naturalWidth > 0;
+        }), `the full ${name}`);
+        const fit = await page.evaluate(() => {
+          const img = document.getElementById('detailImage');
+          const box = img.getBoundingClientRect();
+          const stage = document.querySelector('.detail-stage').getBoundingClientRect();
+          const scale = Math.min(box.width / img.naturalWidth, box.height / img.naturalHeight);
+          return {
+            natural: [img.naturalWidth, img.naturalHeight],
+            shown: [img.naturalWidth * scale, img.naturalHeight * scale],
+            box: [box.left, box.top, box.right, box.bottom],
+            stage: [stage.left, stage.top, stage.right, stage.bottom]
+          };
+        });
+        assert.deepEqual(fit.natural, [w, h]);
+        const [left, top, right, bottom] = fit.box;
+        const [sLeft, sTop, sRight, sBottom] = fit.stage;
+        assert.ok(left >= sLeft && top >= sTop && right <= sRight && bottom <= sBottom, `${name} at ${width}×${height} spills out of the view: ${JSON.stringify(fit)}`);
+        // As big as fits: the picture touches the frame on one side.
+        assert.ok(Math.abs(fit.shown[0] - (right - left)) < 1 || Math.abs(fit.shown[1] - (bottom - top)) < 1, `${name} isn't using the space: ${JSON.stringify(fit)}`);
+        await shot(`fit-${name.replace('.jpg', '')}-${width}`);
+        await page.keyboard.press('Escape');
+        await page.waitForSelector('#detail', { state: 'hidden' });
+      }
+    }
+    await page.setViewportSize({ width: 1280, height: 800 });
+  });
+
   await test('the original folder was never touched', async () => {
     assert.equal(JSON.stringify(fs.readdirSync(LIBRARY, { recursive: true }).sort()), originalLayout);
   });
