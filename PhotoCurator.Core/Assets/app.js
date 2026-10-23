@@ -76,6 +76,12 @@ listen({
   }
 });
 
+// The app window asks the page to save any edit still waiting out its typing pause before it closes.
+window.chrome?.webview?.addEventListener('message', async event => {
+  if (event.data !== 'flush') return;
+  try { await detail.flush(); } finally { window.chrome.webview.postMessage('flushed'); }
+});
+
 start();
 
 async function start() {
