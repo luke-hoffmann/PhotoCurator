@@ -46,6 +46,9 @@ export class Sidebar {
       this.row({ icon: 'captionOff', label: 'No caption', count: counts.nocaption, active: isView('nocaption'), onClick: () => this.onSelect({ kind: 'nocaption' }) }),
       this.row({ icon: 'tagOff', label: 'No tags', count: counts.notags, active: isView('notags'), onClick: () => this.onSelect({ kind: 'notags' }) })
     );
+    if (counts.duplicates > 0 || isView('duplicates')) {
+      smart.append(this.row({ icon: 'copy', label: 'Duplicates', count: counts.duplicates, active: isView('duplicates'), title: 'The same photo more than once', onClick: () => this.onSelect({ kind: 'duplicates' }) }));
+    }
 
     const children = new Map();
     for (const folder of library.folders) {

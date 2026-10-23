@@ -20,6 +20,9 @@ public interface IDesktopHost
     /// <summary>The OS folder picker. Null when cancelled.</summary>
     Task<string?> PickFolderAsync(string title, string? initialPath);
 
+    /// <summary>The OS file picker for .zip files (several allowed). Empty when cancelled.</summary>
+    Task<IReadOnlyList<string>> PickZipFilesAsync(string title);
+
     /// <summary>Opens Explorer with the file selected.</summary>
     void Reveal(string path);
 }
@@ -40,8 +43,12 @@ public sealed partial class CuratorServer : IAsyncDisposable
     readonly JobRunner _jobs;
     readonly object _sync = new();
     readonly byte[] _tokenBytes;
+    readonly Dictionary<string, ImportPlan> _plans = new();
     PhotoLibrary? _library;
     DateIndex? _dates;
+    Fingerprints? _prints;
+    IReadOnlyList<DuplicateGroup> _duplicates = Array.Empty<DuplicateGroup>();
+    Timer? _duplicateTimer;
     WebApplication? _app;
 
     public string Token { get; }
@@ -90,6 +97,7 @@ public sealed partial class CuratorServer : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        _duplicateTimer?.Dispose();
         await StopAsync();
         Interlocked.Exchange(ref _library, null)?.Dispose();
     }
@@ -99,12 +107,17 @@ public sealed partial class CuratorServer : IAsyncDisposable
     {
         var library = new PhotoLibrary(path);
         DateIndex dates;
+        Fingerprints prints;
         lock (_sync)
         {
             var key = Convert.ToHexString(SHA1.HashData(Encoding.UTF8.GetBytes(library.Root.ToLowerInvariant())))[..16];
             dates = new DateIndex(Path.Combine(_dataDir, "dates", key + ".json"));
+            prints = new Fingerprints(Path.Combine(_dataDir, "fingerprints", key + ".json"));
             var old = Interlocked.Exchange(ref _library, library);
             _dates = dates;
+            _prints = prints;
+            _duplicates = Array.Empty<DuplicateGroup>();
+            _plans.Clear();
             old?.Dispose();
             _settings.AddRecent(library.Root);
             _settings.Save();
@@ -114,14 +127,52 @@ public sealed partial class CuratorServer : IAsyncDisposable
         {
             if (!ReferenceEquals(Library, library)) return;
             FillDates(library, dates);
+            FillPrints(library, prints);
             _events.Publish("library", new { version = library.Version });
         };
         dates.Updated += () =>
         {
             if (ReferenceEquals(Library, library)) _events.Publish("library", new { version = library.Version, dates = true });
         };
+        prints.Updated += () =>
+        {
+            if (ReferenceEquals(Library, library)) ScheduleDuplicates();
+        };
         FillDates(library, dates);
+        FillPrints(library, prints);
         _events.Publish("library", new { version = library.Version });
+    }
+
+    void FillPrints(PhotoLibrary library, Fingerprints prints)
+    {
+        prints.Fill(library.Current.Photos.Select(p => (library.FullPath(p.Id), Fingerprints.Key(p.Name, p.Size, p.Modified))).ToList());
+        ScheduleDuplicates();
+    }
+
+    /// <summary>Re-finds duplicates a moment after the folder settles, and tells the window when the result changed.</summary>
+    void ScheduleDuplicates()
+    {
+        lock (_sync)
+        {
+            _duplicateTimer ??= new Timer(_ => FindDuplicates(notify: true));
+            _duplicateTimer.Change(TimeSpan.FromMilliseconds(800), Timeout.InfiniteTimeSpan);
+        }
+    }
+
+    IReadOnlyList<DuplicateGroup> FindDuplicates(bool notify)
+    {
+        var library = Library;
+        var prints = _prints;
+        if (library is null || prints is null) return Array.Empty<DuplicateGroup>();
+        IReadOnlyList<DuplicateGroup> groups;
+        try { groups = DuplicateFinder.Find(library, prints); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return _duplicates; }
+
+        var before = _duplicates;
+        _duplicates = groups;
+        var changed = before.Count != groups.Count || !before.Zip(groups).All(pair => pair.First.Ids.SequenceEqual(pair.Second.Ids));
+        if (notify && changed && ReferenceEquals(Library, library)) _events.Publish("library", new { version = library.Version, duplicates = groups.Count });
+        return groups;
     }
 
     static void FillDates(PhotoLibrary library, DateIndex dates) =>

@@ -7,6 +7,8 @@ import { Grid } from './grid.js';
 import { Sidebar, parentOf } from './sidebar.js';
 import { Detail } from './detail.js';
 import { TagInput } from './tags.js';
+import { DuplicatesView } from './duplicates.js';
+import { importPhotos } from './import.js';
 import {
   el, toast, showDialog, isDialogOpen, confirmInPlace, promptDialog, jobDialog,
   openPopover, popoverOpen, openMenu
@@ -60,6 +62,14 @@ const detail = new Detail({
     $('grid').focus({ preventScroll: true });
     grid.refreshStates();
     updateSelectionBar(grid.selection.size);
+  }
+});
+
+const duplicates = new DuplicatesView($('duplicates'), {
+  onChange: result => afterChange(result, { quiet: !!result.quiet }),
+  onOpen: (ids, index) => {
+    $('selectionBar').hidden = true;
+    detail.open(ids, index);
   }
 });
 
@@ -246,9 +256,13 @@ function render() {
   if (state.view.kind === 'folder' && !library.folders.some(f => f.path === state.view.value)) state.view = { kind: 'all' };
   if (state.view.kind === 'tag' && !library.tags.some(t => t.name === state.view.value)) state.view = { kind: 'all' };
 
-  state.list = filtered(library.photos);
+  const showDuplicates = state.view.kind === 'duplicates';
+  state.list = showDuplicates ? [] : filtered(library.photos);
   grid.setItems(state.list);
-  sidebar.render({ library, view: state.view, counts: counts(library.photos) });
+  $('grid').hidden = showDuplicates;
+  $('duplicates').hidden = !showDuplicates;
+  if (showDuplicates) duplicates.load();
+  sidebar.render({ library, view: state.view, counts: { ...counts(library.photos), duplicates: library.duplicates } });
   renderHeader();
   updateSelectionBar(grid.selection.size);
   updateUndo(library.undo);
@@ -304,6 +318,7 @@ function viewTitle() {
     case 'nocaption': return 'No caption';
     case 'notags': return 'No tags';
     case 'tag': return `Tagged "${v.value}"`;
+    case 'duplicates': return 'Duplicates';
     case 'folder': return v.value ? v.value.split('/').join(' / ') : state.library.root.name;
     default: return 'All photos';
   }
@@ -311,6 +326,14 @@ function viewTitle() {
 
 function renderHeader() {
   $('viewTitle').textContent = viewTitle();
+  if (state.view.kind === 'duplicates') {
+    const groups = state.library.duplicates;
+    $('viewCount').textContent = `${groups.toLocaleString()} group${groups === 1 ? '' : 's'}`;
+    $('subfoldersToggle').hidden = true;
+    $('selectAll').hidden = true;
+    $('emptyState').hidden = true;
+    return;
+  }
   const n = state.list.length;
   $('viewCount').textContent = `${n.toLocaleString()} photo${n === 1 ? '' : 's'}`;
   $('subfoldersToggle').hidden = state.view.kind !== 'folder';
@@ -747,6 +770,25 @@ $('tileSize').addEventListener('input', () => {
 });
 
 $('undoButton').addEventListener('click', undo);
+$('importButton').addEventListener('click', () => importPhotos({
+  nativePicker: !!state.info?.nativePicker,
+  chooseFolder,
+  followJob,
+  photo: id => state.byId.get(id),
+  onImported: async result => {
+    await refresh();
+    updateUndo(state.library.undo);
+    const text = result.imported === 0 ? 'Nothing was imported.' : `Imported ${result.imported.toLocaleString()} photo${result.imported === 1 ? '' : 's'} into ${result.folder}`;
+    toast(result.problems.length ? `${text}. ${result.problems.length} couldn't be copied: ${result.problems[0]}` : text,
+      { error: result.problems.length > 0, action: result.imported ? { label: 'Undo', run: undo } : null });
+    if (result.imported) {
+      sidebar.reveal(result.folder);
+      setView({ kind: 'folder', value: result.folder });
+    } else {
+      render();
+    }
+  }
+}));
 $('grid').addEventListener('focus', () => grid.refreshStates());
 $('grid').addEventListener('blur', () => grid.refreshStates());
 
@@ -805,7 +847,7 @@ document.addEventListener('keydown', event => {
       return;
     }
   }
-  if (event.target === $('grid') || event.target === document.body) {
+  if (state.view.kind !== 'duplicates' && (event.target === $('grid') || event.target === document.body)) {
     if (grid.key(event)) event.preventDefault();
   }
 });

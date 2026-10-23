@@ -28,6 +28,25 @@ write a caption. Then export the folders you want on your website.
 The sidebar's **New** list shows photos you haven't sorted, tagged or captioned yet; **No caption** and **No tags**
 are handy to-do lists too.
 
+### Google Photos albums (no duplicates)
+
+Google Photos can't download "only the new ones", so download the **whole album** each time and let PhotoCurator
+sort it out:
+
+1. In Google Photos, open the album → ⋮ → **Download all**. Keep the zip file(s); there's no need to unzip.
+2. In PhotoCurator, click **Import…**, add the zip file(s) (or a folder) and **Check for new photos**.
+3. The summary says what's in the download: photos **already in your folder** are skipped, even ones you've since
+   moved, renamed or captioned (they're recognized by their content, not their name); photos that appear **twice in
+   the download** come in once; **new** photos come in; and photos that look like an **edited version** of one you
+   have (same moment, different file, e.g. edited in Google Photos) come in too, flagged under Duplicates.
+4. **Import** copies them into `Inbox/<album name>`, where they show up under **New**, Live Photo clips and Takeout
+   `.json` files included. Ctrl+Z takes an import back. The download itself is never changed.
+
+**Duplicates** (in the sidebar when there are any) lists the same photo found more than once in your folder: exact
+copies, and different files of the same moment. Pick the one to keep (it's pre-selected: the captioned, already
+sorted one); it takes over the others' tags and caption, and the others move to `Duplicates set aside`, which you can
+delete in Explorer when you're happy. **Not duplicates** hides a group for good (burst shots, for example).
+
 ### Keyboard
 
 | Where | Keys |
@@ -133,8 +152,9 @@ The finished file is at `PhotoCuratorApp\bin\Release\net10.0-windows\win-x64\pub
 
 ## What it does (and doesn't)
 
-- **Never edits, re-encodes or deletes a photo.** It moves files, creates folders and writes `.md` sidecars; that's
-  all. There is no delete; a "Rejects" folder is just another folder.
+- **Never edits, re-encodes or deletes a photo.** It moves files, creates folders, writes `.md` sidecars and copies
+  in imports; that's all. There is no delete; a "Rejects" folder is just another folder, and duplicates are set
+  aside, not deleted. (Undoing an import removes the copies that import made, if they're unchanged.)
 - **Never overwrites.** A clash when moving becomes `IMG_1 (1).HEIC` (its sidecar and companions are renamed to match).
 - Writes every sidecar atomically (temp file, then replace), so a crash never leaves half a file.
 - Skips hidden and system folders, `.git`, and folders an export wrote.
@@ -149,7 +169,7 @@ The finished file is at `PhotoCuratorApp\bin\Release\net10.0-windows\win-x64\pub
 
 | Folder | What it is |
 |---|---|
-| `PhotoCurator.Core/` | Everything except the window: `Library/` (scan, sidecars, moves, undo), `Media/` (dates, thumbnails, export, copy; Magick.NET), `Server/` (Kestrel on 127.0.0.1 + JSON API), and the UI in `Assets/` (HTML/CSS/JS modules, embedded). Plain .NET 10, builds and tests on any OS. |
+| `PhotoCurator.Core/` | Everything except the window: `Library/` (scan, sidecars, moves, undo, duplicates), `Media/` (dates, fingerprints, import, thumbnails, export, copy; Magick.NET), `Server/` (Kestrel on 127.0.0.1 + JSON API), and the UI in `Assets/` (HTML/CSS/JS modules, embedded). Plain .NET 10, builds and tests on any OS. |
 | `PhotoCuratorApp/` | The Windows window (WinForms + WebView2): folder picker, Show in Explorer, single-file publish settings. |
 | `PhotoCurator.Core.Tests/` | Unit and server tests (xUnit), including a small HEIC fixture. |
 | `tools/DevHost/` | Runs the real server and UI on any OS, in a browser, for development. |

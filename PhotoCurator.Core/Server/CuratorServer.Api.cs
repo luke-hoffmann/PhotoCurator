@@ -17,6 +17,11 @@ public sealed partial class CuratorServer
     sealed record FolderRequest(string? Parent, string? Path, string? Name);
     sealed record ExportRequest(string? Folder, string? Destination);
     sealed record IdRequest(string? Id);
+    sealed record SourcesRequest(List<string>? Sources);
+    sealed record PlanRequest(string? Id);
+    sealed record KeepGroup(string? Keep, List<string>? Others);
+    sealed record KeepRequest(List<KeepGroup>? Groups, bool AllExact);
+    sealed record IdsRequest(List<string>? Ids);
 
     static readonly Dictionary<string, string> ImageTypes = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -43,6 +48,34 @@ public sealed partial class CuratorServer
                 if (_host is null) await JsonAsync(res, 200, new { unsupported = true });
                 else await JsonAsync(res, 200, new { path = await _host.PickFolderAsync(pick.Title ?? "Choose a folder", pick.Initial) });
                 return;
+            case ("POST", "/api/pick-files"):
+                var pickFiles = await BodyAsync<PickRequest>(context);
+                if (_host is null) await JsonAsync(res, 200, new { unsupported = true });
+                else await JsonAsync(res, 200, new { paths = await _host.PickZipFilesAsync(pickFiles.Title ?? "Choose zip files") });
+                return;
+            case ("POST", "/api/import/check"):
+                await JsonAsync(res, 200, StartImportCheck(await BodyAsync<SourcesRequest>(context)));
+                return;
+            case ("POST", "/api/import/run"):
+                await JsonAsync(res, 200, StartImport(await BodyAsync<PlanRequest>(context)));
+                return;
+            case ("GET", "/api/duplicates"):
+                await JsonAsync(res, 200, DuplicatesJson(RequireLibrary()));
+                return;
+            case ("POST", "/api/duplicates/keep"):
+                await JsonAsync(res, 200, KeepDuplicates(await BodyAsync<KeepRequest>(context)));
+                return;
+            case ("POST", "/api/duplicates/dismiss"):
+            {
+                var r = await BodyAsync<IdsRequest>(context);
+                var lib = RequireLibrary();
+                var keys = (r.Ids ?? new()).Select(id => lib.Get(id)).Select(p => Fingerprints.Key(p.Name, p.Size, p.Modified)).ToList();
+                if (keys.Count < 2) throw new CuratorException("Pick the group to dismiss.");
+                _prints!.Dismiss(keys);
+                FindDuplicates(notify: false);
+                await JsonAsync(res, 200, new { message = "Marked as not duplicates", duplicates = _duplicates.Count });
+                return;
+            }
             case ("POST", "/api/copy"):
                 await JsonAsync(res, 200, StartCopy(await BodyAsync<CopyRequest>(context)));
                 return;
@@ -212,6 +245,8 @@ public sealed partial class CuratorServer
             version = lib.Version,
             root = new { path = lib.Root, name = lib.Name },
             undo = lib.UndoDescription,
+            duplicates = _duplicates.Count,
+            checking = _prints?.Pending ?? 0,
             photos = snapshot.Photos.Select(p => new
             {
                 id = p.Id,
@@ -229,6 +264,99 @@ public sealed partial class CuratorServer
             folders = snapshot.Folders.Select(f => new { path = f.Path, name = f.Name, count = f.Count, total = f.Total }),
             tags = snapshot.Tags.Select(t => new { name = t.Key, count = t.Value })
         };
+    }
+
+    object StartImportCheck(SourcesRequest r)
+    {
+        var lib = RequireLibrary();
+        var prints = _prints!;
+        var sources = (r.Sources ?? new()).Where(s => !string.IsNullOrWhiteSpace(s)).ToList();
+        if (sources.Count == 0) throw new CuratorException("Choose a zip file or folder to import.");
+        var job = _jobs.Start("check", "Checking the download against your folder", (report, cancel) =>
+        {
+            var plan = Importer.Check(lib, prints, sources, report, cancel);
+            lock (_plans) _plans[plan.Id] = plan;
+            return new
+            {
+                id = plan.Id,
+                destination = plan.Destination,
+                total = plan.Photos.Count,
+                existing = plan.Count("existing"),
+                repeat = plan.Count("repeat"),
+                @new = plan.Count("new"),
+                edited = plan.Photos.Where(p => p.Kind == "edited").Select(p => new { name = p.Name, path = p.Path, match = p.Match }),
+                toCopy = plan.ToCopy.Count()
+            };
+        });
+        return new { job };
+    }
+
+    object StartImport(PlanRequest r)
+    {
+        var lib = RequireLibrary();
+        var prints = _prints!;
+        ImportPlan? plan;
+        lock (_plans) _plans.Remove(r.Id ?? "", out plan);
+        if (plan is null) throw new CuratorException("That check is out of date. Check the download again.", 409);
+        var job = _jobs.Start("import", $"Importing into {plan.Destination}", (report, cancel) =>
+        {
+            var result = Importer.Run(lib, prints, plan, report, cancel);
+            ScheduleDuplicates();
+            return result;
+        });
+        return new { job };
+    }
+
+    object DuplicatesJson(PhotoLibrary lib)
+    {
+        var groups = _duplicates;
+        if (groups.Count == 0) groups = FindDuplicates(notify: false);
+        return new
+        {
+            checking = _prints?.Pending ?? 0,
+            groups = groups.Select(g => new
+            {
+                kind = g.Kind,
+                keep = g.Keep,
+                photos = g.Ids.Select(id => lib.Current.Find(id)).OfType<PhotoEntry>().Select(p =>
+                {
+                    var size = MetadataReader.ReadSize(lib.FullPath(p.Id));
+                    return new
+                    {
+                        id = p.Id,
+                        folder = p.Folder,
+                        name = p.Name,
+                        size = p.Size,
+                        v = p.Modified.ToString("x"),
+                        caption = p.Sidecar?.Caption ?? "",
+                        tags = (IReadOnlyList<string>?)p.Sidecar?.Tags ?? Array.Empty<string>(),
+                        width = size?.Width,
+                        height = size?.Height
+                    };
+                })
+            })
+        };
+    }
+
+    object KeepDuplicates(KeepRequest r)
+    {
+        var lib = RequireLibrary();
+        List<(string Keep, IReadOnlyList<string> Others)> groups;
+        if (r.AllExact)
+        {
+            groups = FindDuplicates(notify: false).Where(g => g.Kind == "file")
+                .Select(g => (g.Keep, (IReadOnlyList<string>)g.Ids.Where(id => id != g.Keep).ToList())).ToList();
+            if (groups.Count == 0) throw new CuratorException("There are no exact copies to set aside.");
+        }
+        else
+        {
+            groups = (r.Groups ?? new())
+                .Where(g => !string.IsNullOrEmpty(g.Keep) && g.Others is { Count: > 0 })
+                .Select(g => (g.Keep!, (IReadOnlyList<string>)g.Others!)).ToList();
+        }
+        var result = lib.SetAsideDuplicates(groups);
+        FindDuplicates(notify: false);
+        return Done(lib, result);
     }
 
     static object PhotoJson(PhotoLibrary lib, string? id)

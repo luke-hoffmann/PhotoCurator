@@ -53,6 +53,7 @@
           <input id="tileSize" type="range" min="120" max="360" step="10" value="200">
           <span data-icon="gridLarge"></span>
         </label>
+        <button id="importButton" class="button" type="button" title="Bring in photos from a download, skipping ones you already have"><span data-icon="import"></span>Import…</button>
         <button id="undoButton" class="button icon-button" type="button" title="Undo (Ctrl+Z)" disabled><span data-icon="undo"></span></button>
       </div>
     </header>
@@ -73,6 +74,7 @@
         </div>
       </div>
       <div id="grid" class="grid-scroll" tabindex="0" aria-label="Photos"></div>
+      <div id="duplicates" class="dupes" hidden></div>
       <div id="emptyState" class="empty-state" hidden></div>
     </main>
 

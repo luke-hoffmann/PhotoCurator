@@ -115,6 +115,33 @@ sealed class MainForm : Form, IDesktopHost
         return result.Task;
     }
 
+    public Task<IReadOnlyList<string>> PickZipFilesAsync(string title)
+    {
+        var result = new TaskCompletionSource<IReadOnlyList<string>>();
+        BeginInvoke(() =>
+        {
+            try
+            {
+                using var dialog = new OpenFileDialog
+                {
+                    Title = title,
+                    Filter = "Zip files (*.zip)|*.zip",
+                    Multiselect = true,
+                    CheckFileExists = true,
+                    InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) is { Length: > 0 } home && Directory.Exists(Path.Combine(home, "Downloads"))
+                        ? Path.Combine(home, "Downloads")
+                        : ""
+                };
+                result.SetResult(dialog.ShowDialog(this) == DialogResult.OK ? dialog.FileNames : Array.Empty<string>());
+            }
+            catch (Exception ex)
+            {
+                result.SetException(ex);
+            }
+        });
+        return result.Task;
+    }
+
     public void Reveal(string path)
     {
         try { Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = false }); }

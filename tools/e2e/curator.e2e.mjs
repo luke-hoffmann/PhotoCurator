@@ -30,6 +30,23 @@ const files = dir => fs.existsSync(dir) ? fs.readdirSync(dir).sort() : [];
 const read = file => fs.readFileSync(file, 'utf8');
 const exists = file => fs.existsSync(file);
 
+/** Adds a minimal EXIF block with DateTimeOriginal ("2024:05:01 10:00:00") to a JPEG, like a phone photo has. */
+function withExifDate(jpeg, taken) {
+  const tiff = Buffer.alloc(64);
+  tiff.write('II', 0, 'ascii');
+  tiff.writeUInt16LE(42, 2);
+  tiff.writeUInt32LE(8, 4);
+  tiff.writeUInt16LE(1, 8);                                        // IFD0: one entry,
+  tiff.writeUInt16LE(0x8769, 10); tiff.writeUInt16LE(4, 12); tiff.writeUInt32LE(1, 14); tiff.writeUInt32LE(26, 18); // the Exif IFD at 26
+  tiff.writeUInt16LE(1, 26);                                       // Exif IFD: one entry,
+  tiff.writeUInt16LE(0x9003, 28); tiff.writeUInt16LE(2, 30); tiff.writeUInt32LE(20, 32); tiff.writeUInt32LE(44, 36); // DateTimeOriginal at 44
+  Buffer.from(taken + '\0', 'ascii').copy(tiff, 44);
+  const header = Buffer.from('Exif\0\0', 'binary');
+  const length = 2 + header.length + tiff.length;
+  const app1 = Buffer.concat([Buffer.from([0xff, 0xe1, length >> 8, length & 0xff]), header, tiff]);
+  return Buffer.concat([jpeg.subarray(0, 2), app1, jpeg.subarray(2)]);
+}
+
 async function until(check, what, timeout = 10000) {
   const end = Date.now() + timeout;
   let last;
@@ -73,7 +90,7 @@ try {
 
   // Photos made in the browser: a nested Google-Photos-style download, plus the HEIC test fixture.
   await page.goto('about:blank');
-  const makeJpeg = (seed, width = 1200, height = 900) => page.evaluate(([seed, width, height]) => {
+  const makeJpeg = (seed, width = 1200, height = 900, quality = 0.85) => page.evaluate(([seed, width, height, quality]) => {
     const canvas = document.createElement('canvas');
     canvas.width = width;
     canvas.height = height;
@@ -87,8 +104,8 @@ try {
     g.fillStyle = 'rgba(255,255,255,0.85)';
     g.font = 'bold 120px sans-serif';
     g.fillText(`#${seed}`, 60, height - 80);
-    return new Promise(resolve => canvas.toBlob(blob => blob.arrayBuffer().then(b => resolve([...new Uint8Array(b)])), 'image/jpeg', 0.85));
-  }, [seed, width, height]).then(bytes => Buffer.from(bytes));
+    return new Promise(resolve => canvas.toBlob(blob => blob.arrayBuffer().then(b => resolve([...new Uint8Array(b)])), 'image/jpeg', quality));
+  }, [seed, width, height, quality]).then(bytes => Buffer.from(bytes));
 
   const put = async (rel, seed) => {
     const file = path.join(LIBRARY, rel);
@@ -231,6 +248,98 @@ try {
     assert.deepEqual(files(path.join(SITE, 'prep-for-paint')), ['folder.md', 'img-0005.jpg', 'img-0005.md']);
     assert.match(read(path.join(SITE, 'prep-for-paint', 'img-0005.md')), /^---\nimage: \.\/img-0005\.jpg\ndate: /);
     await page.click('.dialog >> text=Done');
+  });
+
+  // A Google Photos album that keeps growing, downloaded whole each time.
+  const album = (n, files) => {
+    const dir = path.join(WORK, `download-${n}`, 'Field Work album');
+    fs.mkdirSync(dir, { recursive: true });
+    for (const [name, bytes] of Object.entries(files)) fs.writeFileSync(path.join(dir, name), bytes);
+    return dir;
+  };
+  const shots = {
+    'shot-a.jpg': withExifDate(await makeJpeg(41), '2024:05:01 10:00:00'),
+    'shot-b.jpg': withExifDate(await makeJpeg(42), '2024:05:01 10:05:00'),
+    'shot-c.jpg': withExifDate(await makeJpeg(43), '2024:05:01 10:10:00')
+  };
+  const firstDownload = album(1, shots);
+  const secondDownload = album(2, {
+    ...shots,
+    'shot-d.jpg': withExifDate(await makeJpeg(44), '2024:05:02 09:00:00'),
+    'shot-e.jpg': withExifDate(await makeJpeg(45), '2024:05:02 09:30:00'),
+    // shot-a edited in Google Photos: same moment, different file.
+    'shot-a-edited.jpg': withExifDate(await makeJpeg(41, 1200, 900, 0.5), '2024:05:01 10:00:00')
+  });
+  const INBOX = path.join(COPY, 'Inbox', 'Field Work album');
+
+  const importFrom = async (source, expect) => {
+    await page.click('#importButton');
+    await page.fill('.dialog input', source);
+    await page.click('.dialog button:text-is("Add")');
+    await page.click('.dialog >> text=Check for new photos');
+    await page.waitForSelector(`.dialog h2 >> text=${expect}`);
+  };
+
+  await test('import a downloaded album', async () => {
+    await importFrom(firstDownload, 'Ready to import');
+    assert.match(await page.textContent('.import-summary'), /3 new/);
+    await shot('10-import-summary');
+    await page.click('.dialog >> text=Import 3');
+    await page.waitForSelector('.toast >> text=Imported 3 photos into Inbox/Field Work album');
+    assert.deepEqual(files(INBOX), ['shot-a.jpg', 'shot-b.jpg', 'shot-c.jpg']);
+    await until(async () => (await page.textContent('#viewTitle')) === 'Inbox / Field Work album', 'the inbox folder view');
+  });
+
+  await test('caption one and sort it into Field Work', async () => {
+    const a = page.locator('.tile', { hasText: 'shot-a.jpg' });
+    await a.hover();
+    await a.locator('.check').click();
+    await page.keyboard.press('c');
+    await page.keyboard.type('The keeper');
+    await page.keyboard.press('Enter');
+    await until(() => exists(path.join(INBOX, 'shot-a.jpg.md')) && read(path.join(INBOX, 'shot-a.jpg.md')).includes('caption: The keeper'), 'the caption');
+    await page.keyboard.press('m');
+    await page.keyboard.type('Field Work');
+    await page.keyboard.press('Enter');
+    await until(() => exists(path.join(COPY, 'Field Work', 'shot-a.jpg')), 'shot-a in Field Work');
+    await page.keyboard.press('Escape');
+  });
+
+  await test('downloading the whole album again imports only what is new', async () => {
+    await importFrom(secondDownload, 'Ready to import');
+    const summary = await page.textContent('.import-summary');
+    assert.match(summary, /6 photos in this download/);
+    assert.match(summary, /3 already in your folder/);
+    assert.match(summary, /2 new/);
+    assert.match(summary, /1 looks like an edited version/);
+    assert.match(await page.textContent('.edited-list'), /shot-a-edited\.jpg[\s\S]*Field Work\/shot-a\.jpg/);
+    await shot('11-import-again');
+    await page.click('.dialog >> text=Import 3');
+    await page.waitForSelector('.toast >> text=Imported 3 photos');
+    assert.deepEqual(files(INBOX), ['shot-a-edited.jpg', 'shot-b.jpg', 'shot-c.jpg', 'shot-d.jpg', 'shot-e.jpg']);
+    assert.ok(read(path.join(COPY, 'Field Work', 'shot-a.jpg.md')).includes('caption: The keeper'));
+  });
+
+  await test('the same download a third time has nothing new', async () => {
+    await importFrom(secondDownload, 'Nothing new');
+    await page.click('.dialog >> text=Done');
+    assert.deepEqual(files(INBOX), ['shot-a-edited.jpg', 'shot-b.jpg', 'shot-c.jpg', 'shot-d.jpg', 'shot-e.jpg']);
+  });
+
+  await test('Duplicates: keep the captioned one, set the edit aside, undo', async () => {
+    await until(async () => (await page.locator('.side-row >> text=Duplicates').count()) === 1, 'the Duplicates entry', 15000);
+    await page.click('.side-row >> text=Duplicates');
+    await page.waitForSelector('.dupe-card');
+    assert.equal(await page.locator('.dupe-card').count(), 1);
+    assert.equal(await page.locator('.dupe-item.kept').textContent().then(t => t.includes('shot-a.jpg') && t.includes('The keeper')), true);
+    await shot('12-duplicates');
+    await page.click('.dupe-card >> text=Keep the selected one, set the others aside');
+    const setAside = path.join(COPY, 'Duplicates set aside');
+    await until(() => exists(path.join(setAside, 'shot-a-edited.jpg')), 'the edit set aside');
+    assert.ok(exists(path.join(COPY, 'Field Work', 'shot-a.jpg')));
+    await page.waitForSelector('.dupes-empty');
+    await page.keyboard.press('Control+z');
+    await until(() => exists(path.join(INBOX, 'shot-a-edited.jpg')) && !exists(setAside), 'the set-aside undone');
   });
 
   await test('the photo view shows the whole photo, however big', async () => {
