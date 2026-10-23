@@ -173,8 +173,11 @@ try {
     await page.waitForSelector('#detailName >> text=IMG_0002.jpg');
     const sidecar = path.join(COPY, 'Field Work', 'Prepping for paint', 'IMG_0001.jpg.md');
     await until(() => read(sidecar).includes('caption: Sanding the patched drywall') && read(sidecar).includes('tags: [hammer, drywall]'), 'the caption and tag on disk');
+    await page.keyboard.press('t');
+    await page.keyboard.type('half-typed');
     await page.keyboard.press('Control+Enter');
     await page.waitForSelector('#detailName >> text=IMG_0003.jpg');
+    await until(async () => (await page.inputValue('#fieldTags input')) === '', 'uncommitted tag text to be dropped');
     await until(async () => (await page.evaluate(() => document.activeElement.id)) === 'fieldCaption', 'the caption field to have focus');
     await page.keyboard.press('Escape');
     await page.keyboard.press('Escape');

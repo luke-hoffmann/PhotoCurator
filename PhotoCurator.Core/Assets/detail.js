@@ -181,6 +181,7 @@ export class Detail {
     this.date.value = toInputDate(data.date);
     $('dateSource').textContent = sourceLabels[data.dateSource] ?? '';
     this.tags.setTags(data.tags ?? []);
+    this.tags.clearText();
     this.alt.value = data.alt ?? '';
     this.description.value = data.description ?? '';
     $('fieldFolderName').textContent = data.folder || this.app.rootName();

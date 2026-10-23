@@ -58,6 +58,12 @@ export class TagInput {
     this.input.focus();
   }
 
+  /** Drops half-typed text (never committed with Enter), e.g. when the view moves to another photo. */
+  clearText() {
+    this.input.value = '';
+    this.list.hidden = true;
+  }
+
   chip(tag) {
     const chip = document.createElement('span');
     chip.className = 'chip';
