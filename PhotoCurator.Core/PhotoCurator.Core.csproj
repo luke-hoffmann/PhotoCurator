@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>PhotoCurator.Core</RootNamespace>
+    <AssemblyName>PhotoCurator.Core</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Lets a plain class library use Kestrel/ASP.NET Core hosting APIs -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Magick.NET-Q8-AnyCPU" Version="15.0.0" />
+    <PackageReference Include="YamlDotNet" Version="18.1.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The app's web UI. Flat folder; resources are named "Assets.<file>" so lookups stay predictable. -->
+    <EmbeddedResource Include="Assets\*.*" LogicalName="Assets.%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="PhotoCurator.Core.Tests" />
+  </ItemGroup>
+
+</Project>
