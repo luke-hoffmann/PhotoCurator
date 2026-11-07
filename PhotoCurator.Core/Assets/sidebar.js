@@ -112,7 +112,14 @@ export class Sidebar {
       this.render(this.lastArgs);
     });
     if (depth > 0) row.append(twisty);
-    row.append(icon('folder'), el('span', { class: 'label', text: displayName ?? folder.name }), el('span', { class: 'count', text: folder.total }));
+    row.append(icon('folder'), el('span', { class: 'label', text: displayName ?? folder.name }));
+    if (folder.writeUp) {
+      const doc = icon('doc');
+      doc.classList.add('has-writeup');
+      doc.title = 'Has a write-up';
+      row.append(doc);
+    }
+    row.append(el('span', { class: 'count', text: folder.total }));
 
     const more = el('button', { class: 'row-more', type: 'button', title: 'Folder actions', tabindex: '-1' }, icon('more'));
     more.addEventListener('click', event => {

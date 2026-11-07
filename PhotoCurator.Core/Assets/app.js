@@ -9,6 +9,7 @@ import { Detail } from './detail.js';
 import { TagInput } from './tags.js';
 import { DuplicatesView } from './duplicates.js';
 import { importPhotos } from './import.js';
+import { WriteUpView } from './writeup.js';
 import {
   el, toast, showDialog, isDialogOpen, confirmInPlace, promptDialog, jobDialog,
   openPopover, popoverOpen, openMenu
@@ -73,6 +74,12 @@ const duplicates = new DuplicatesView($('duplicates'), {
   }
 });
 
+const writeup = new WriteUpView($('writeup'), {
+  library: () => state.library,
+  onSaved: result => updateUndo(result.undo),
+  onHistory: () => drawUndo()
+});
+
 $('sort').value = state.sort;
 $('subfolders').checked = state.subfolders;
 $('tileSize').value = readPref('tile', '200');
@@ -89,7 +96,7 @@ listen({
 // The app window asks the page to save any edit still waiting out its typing pause before it closes.
 window.chrome?.webview?.addEventListener('message', async event => {
   if (event.data !== 'flush') return;
-  try { await detail.flush(); } finally { window.chrome.webview.postMessage('flushed'); }
+  try { await Promise.all([detail.flush(), writeup.flush()]); } finally { window.chrome.webview.postMessage('flushed'); }
 });
 
 start();
@@ -257,11 +264,14 @@ function render() {
   if (state.view.kind === 'tag' && !library.tags.some(t => t.name === state.view.value)) state.view = { kind: 'all' };
 
   const showDuplicates = state.view.kind === 'duplicates';
+  const showWriteUp = isWriteUp();
   state.list = showDuplicates ? [] : filtered(library.photos);
-  grid.setItems(state.list);
-  $('grid').hidden = showDuplicates;
+  grid.setItems(showWriteUp ? [] : state.list);
+  $('grid').hidden = showDuplicates || showWriteUp;
   $('duplicates').hidden = !showDuplicates;
+  $('writeup').hidden = !showWriteUp;
   if (showDuplicates) duplicates.load();
+  if (showWriteUp) writeup.show(state.view.value).then(() => writeup.reloadIfIdle());
   sidebar.render({ library, view: state.view, counts: { ...counts(library.photos), duplicates: library.duplicates } });
   renderHeader();
   updateSelectionBar(grid.selection.size);
@@ -326,6 +336,19 @@ function viewTitle() {
 
 function renderHeader() {
   $('viewTitle').textContent = viewTitle();
+  const tabs = $('viewTabs');
+  tabs.hidden = state.view.kind !== 'folder';
+  for (const tab of tabs.querySelectorAll('[data-tab]')) {
+    tab.setAttribute('aria-selected', String((state.view.tab ?? 'photos') === tab.dataset.tab));
+  }
+  if (isWriteUp()) {
+    const n = state.list.length;
+    $('viewCount').textContent = `${n.toLocaleString()} photo${n === 1 ? '' : 's'}`;
+    $('subfoldersToggle').hidden = true;
+    $('selectAll').hidden = true;
+    $('emptyState').hidden = true;
+    return;
+  }
   if (state.view.kind === 'duplicates') {
     const groups = state.library.duplicates;
     $('viewCount').textContent = `${groups.toLocaleString()} group${groups === 1 ? '' : 's'}`;
@@ -363,7 +386,15 @@ function renderHeader() {
   empty.replaceChildren(el('strong', { text: title }), el('span', { text }));
 }
 
+/** A folder's Write-up tab is showing. */
+function isWriteUp() {
+  return state.view.kind === 'folder' && state.view.tab === 'writeup';
+}
+
 function setView(view) {
+  // Moving between folders keeps the tab you were on.
+  if (view.kind === 'folder' && !view.tab && state.view.kind === 'folder') view = { ...view, tab: state.view.tab };
+  writeup.flush();
   state.view = view;
   if (view.kind === 'folder') sidebar.reveal(view.value);
   grid.clearSelection();
@@ -372,10 +403,28 @@ function setView(view) {
   $('grid').focus({ preventScroll: true });
 }
 
+let lastUndo = null;
+
 function updateUndo(description) {
+  lastUndo = description;
+  drawUndo();
+}
+
+/** In the Write-up tab, Undo steps back through the write-up's own edits first. */
+function drawUndo() {
   const button = $('undoButton');
-  button.disabled = !description;
-  button.title = description ? `Undo: ${description} (Ctrl+Z)` : 'Nothing to undo';
+  if (isWriteUp() && writeup.canUndo) {
+    button.disabled = false;
+    button.title = 'Undo your last change to the write-up (Ctrl+Z)';
+    return;
+  }
+  button.disabled = !lastUndo;
+  button.title = lastUndo ? `Undo: ${lastUndo} (Ctrl+Z)` : 'Nothing to undo';
+}
+
+function undoButton() {
+  if (isWriteUp() && writeup.undo()) return;
+  undo();
 }
 
 /** After any change: show what happened (with Undo), refresh the photo list right away. */
@@ -394,6 +443,7 @@ async function afterChange(result, { quiet = false } = {}) {
 async function run(promise) {
   $('saveState').textContent = 'Working…';
   try {
+    await writeup.flush();
     const result = await promise;
     await afterChange(result);
     return result;
@@ -417,7 +467,7 @@ async function undo() {
 // ---------- selection actions ----------
 
 function updateSelectionBar(count) {
-  $('selectionBar').hidden = count === 0 || detail.isOpen;
+  $('selectionBar').hidden = count === 0 || detail.isOpen || isWriteUp();
   $('selectionCount').textContent = `${count.toLocaleString()} selected`;
 }
 
@@ -627,6 +677,7 @@ function folderMenu(path, x, y) {
   const items = [
     { label: 'New folder inside…', icon: 'folderPlus', run: () => newFolder(path) }
   ];
+  items.push({ label: 'Write-up', icon: 'doc', run: () => setView({ kind: 'folder', value: path, tab: 'writeup' }) });
   if (path) items.push({ label: 'Rename…', icon: 'rename', run: () => renameFolder(path) });
   items.push({ label: 'Export for web…', icon: 'export', run: () => exportFolder(path) }, 'separator', { note: path || state.library.root.path });
   openMenu(x, y, items);
@@ -769,7 +820,12 @@ $('tileSize').addEventListener('input', () => {
   writePref('tile', $('tileSize').value);
 });
 
-$('undoButton').addEventListener('click', undo);
+$('undoButton').addEventListener('click', undoButton);
+$('viewTabs').addEventListener('click', event => {
+  const tab = event.target.closest('[data-tab]')?.dataset.tab;
+  if (!tab || state.view.kind !== 'folder' || (state.view.tab ?? 'photos') === tab) return;
+  setView({ ...state.view, tab });
+});
 $('importButton').addEventListener('click', () => importPhotos({
   nativePicker: !!state.info?.nativePicker,
   chooseFolder,
@@ -797,8 +853,11 @@ $('grid').addEventListener('blur', () => grid.refreshStates());
 document.addEventListener('keydown', event => {
   if (isDialogOpen() || $('app').hidden && !detail.isOpen) return;
   const ctrl = event.ctrlKey || event.metaKey;
-  const typing = event.target.matches?.('input, textarea, select');
+  const typing = event.target.matches?.('input, textarea, select') || event.target.isContentEditable;
 
+  // In the write-up, Ctrl+Z steps through its own edits (WriteUpView.key). Only with none left does it reach the
+  // folder-wide undo, and never from inside a text field.
+  if (isWriteUp() && !detail.isOpen && !popoverOpen() && (writeup.canUndo || writeup.canRedo || typing) && writeup.key(event)) return;
   if (ctrl && event.key.toLowerCase() === 'z' && !event.shiftKey && !typing) {
     event.preventDefault();
     undo();
@@ -824,6 +883,8 @@ document.addEventListener('keydown', event => {
     return;
   }
   if (typing) return;
+  // The write-up has its own keys (typing, Enter, arrows); the grid's shortcuts stay out of its way.
+  if (isWriteUp()) return;
 
   if (event.key === 'Escape') {
     grid.clearSelection();

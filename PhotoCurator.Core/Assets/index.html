@@ -67,6 +67,10 @@
           <span id="viewCount" class="muted"></span>
         </div>
         <div class="content-tools">
+          <div id="viewTabs" class="segmented" role="tablist" aria-label="Show" hidden>
+            <button type="button" role="tab" data-tab="photos"><span data-icon="photos"></span>Photos</button>
+            <button type="button" role="tab" data-tab="writeup"><span data-icon="doc"></span>Write-up</button>
+          </div>
           <label id="subfoldersToggle" class="checkbox" hidden>
             <input id="subfolders" type="checkbox" checked> Include subfolders
           </label>
@@ -75,6 +79,7 @@
       </div>
       <div id="grid" class="grid-scroll" tabindex="0" aria-label="Photos"></div>
       <div id="duplicates" class="dupes" hidden></div>
+      <div id="writeup" class="writeup" hidden></div>
       <div id="emptyState" class="empty-state" hidden></div>
     </main>
 

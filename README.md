@@ -5,7 +5,8 @@ Windows `.exe`; everything it knows lives in that folder as plain files, so ther
 
 Built for a pile of Google Photos downloads: open the folder, look through every photo (at any depth), sort them
 into folders like `Field Work/Prepping for paint` or `Camping/Big Sur 2025`, tag them (`hammer`, `headshot`…) and
-write a caption. Then export the folders you want on your website.
+write a caption. Give a project folder a write-up, the story with its photos in between. Then export the folders you
+want on your website.
 
 ## Use
 
@@ -21,9 +22,9 @@ write a caption. Then export the folders you want on your website.
    - **Tags… (T)**: type a tag and press Enter; new tags are created on the spot. × removes a tag from all of them.
    - **Move to… (M)**: pick a folder, or type a new name. `Camping/Big Sur` creates both folders.
    - **Caption… (C)**: one caption for all of them.
-6. Or drag photos onto a folder in the sidebar. Right-click a folder for **New folder inside**, **Rename** and
-   **Export for web**.
-7. **Ctrl+Z** undoes moves, folder changes, tags and captions (for as long as the folder is open).
+6. Or drag photos onto a folder in the sidebar. Right-click a folder for **New folder inside**, **Rename**,
+   **Write-up** and **Export for web**.
+7. **Ctrl+Z** undoes moves, folder changes, tags, captions and write-ups (for as long as the folder is open).
 
 The sidebar's **New** list shows photos you haven't sorted, tagged or captioned yet; **No caption** and **No tags**
 are handy to-do lists too.
@@ -47,12 +48,55 @@ copies, and different files of the same moment. Pick the one to keep (it's pre-s
 sorted one); it takes over the others' tags and caption, and the others move to `Duplicates set aside`, which you can
 delete in Explorer when you're happy. **Not duplicates** hides a group for good (burst shots, for example).
 
+### Write-ups
+
+Every folder has a **Write-up** tab next to **Photos**: the story of that project with its photos in between, the
+way a case study or blog post reads. It's saved as `folder.md` in that folder and exported with it.
+
+- **Type straight into the page.** The title and summary are at the top (the title starts out as the folder's name);
+  Enter moves on to the story.
+- **Add photos** by dragging them in from the strip above, to any spot in the story, or by clicking one to add it
+  after the paragraph you're in. Write its caption right under it. Photos already in the story have a check mark.
+- Start a line with `## ` for a heading, `- ` for a list, `1. ` for a numbered list or `> ` for a quote, like in
+  Markdown. **Ctrl+B** bold, **Ctrl+I** italic, **Ctrl+K** link, **Shift+Enter** a line break.
+- **Hover** over a paragraph or photo for its controls: **+** adds a block below, ⠿ drags it somewhere else, and a
+  photo's toolbar moves it up or down, swaps in another photo, or takes it out of the story (the photo itself stays
+  in the folder).
+- **Split** shows the Markdown beside the page, **Write** only the page, **Markdown** only the text. Edit either side
+  and the other follows. Anything the page can't show as-is (tables, code, HTML) is kept exactly as you wrote it.
+- **Cover** picks the project's main photo (by default, the story's first photo). **Add date** says when it happened.
+- It saves as you type. **Ctrl+Z** steps back through your edits (a burst of typing is one step, moving or removing a
+  photo is one step), **Ctrl+Shift+Z** forward again.
+
+It's plain Markdown, so any text editor works too. Photo paths are relative to the folder, so a write-up can use
+photos from the folders inside it:
+
+```markdown
+---
+title: Attic insulation
+summary: Pulling out 40 years of old insulation and blowing in R-49.
+date: 2024-05-01
+cover: IMG_0966.HEIC
+---
+
+The attic had decades of old, dusty insulation. We pulled it all out by hand before air sealing.
+
+## Demo day
+
+![Pulling old insulation out of the attic](IMG_0172.HEIC)
+
+![Where we started](<Before photos/IMG_0001.HEIC>)
+```
+
+Folders with a write-up have a small page icon in the sidebar.
+
 ### Keyboard
 
 | Where | Keys |
 |---|---|
 | Grid | arrows move · Space select · Shift+arrows extend · Enter open · Ctrl+A all · Esc clear · T / M / C act on the selection · Ctrl+F or / search · Ctrl + / Ctrl − thumbnail size |
 | Photo | ← → previous/next · Enter caption · T tags · Ctrl+Enter save and next · Alt+← → or PageUp/PageDown while typing · Esc back |
+| Write-up | Enter new paragraph · Shift+Enter line break · `## ` heading · `- ` list · `> ` quote · Ctrl+B / Ctrl+I / Ctrl+K · Ctrl+Z / Ctrl+Shift+Z undo/redo in the write-up |
 | Anywhere | Ctrl+Z undo |
 
 ## How your folder is laid out
@@ -92,16 +136,20 @@ PhotoCurator writes:
 src/content/field/
   folder.md                        title: Field Work
   prepping-for-paint/
-    folder.md                      title: Prepping for paint
+    folder.md                      the folder's write-up (or just its title)
     img-4821.jpg                   ≤ 2400 px, upright, sRGB, no metadata (so no GPS location)
     img-4821.md                    the sidecar, plus image: ./img-4821.jpg
 ```
+
+A write-up's photos point at the exported copies (`![Sanding the patch](./img-4821.jpg)`), and so does its cover
+(the story's first photo when none was picked). A photo from outside the exported folder can't come along: it's left
+out of the page, and the export says so.
 
 Exporting again rewrites only what changed and removes only files an earlier export wrote (they're listed in
 `.photocurator-export`), so anything else in the destination is left alone. The destination must be empty the first
 time, and outside the open folder. Your originals are never touched.
 
-For an [Astro](https://astro.build) site, this content config reads the export (checked against Astro 7.3):
+For an [Astro](https://astro.build) site, this content config reads the export (checked against Astro 7.4):
 
 ```ts
 // src/content.config.ts
@@ -123,14 +171,43 @@ const field = defineCollection({
 
 const fieldFolders = defineCollection({
   loader: glob({ base: './src/content/field', pattern: '**/folder.md' }),
-  schema: z.object({ title: z.string() })
+  schema: ({ image }) =>
+    z.object({
+      title: z.string(),
+      summary: z.string().optional(),
+      date: z.coerce.date().optional(),
+      cover: image().optional()
+    })
 });
 
 export const collections = { field, fieldFolders };
 ```
 
 Then `<Image src={photo.data.image} alt={photo.data.alt ?? photo.data.caption} />` from `astro:assets` makes the
-responsive WebP/AVIF versions at build time.
+responsive WebP/AVIF versions at build time. A page per write-up, with its photos optimized the same way (each
+caption becomes the photo's alt text):
+
+```astro
+---
+// src/pages/field/[...slug].astro
+import { getCollection, render } from 'astro:content';
+
+export async function getStaticPaths() {
+  const folders = await getCollection('fieldFolders');
+  return folders
+    .filter(folder => folder.id !== 'folder') // the top folder.md is the /field page itself
+    .map(folder => ({ params: { slug: folder.id.replace(/\/folder$/, '') }, props: { folder } }));
+}
+
+const { folder } = Astro.props;
+const { Content } = await render(folder);
+---
+<article>
+  <h1>{folder.data.title}</h1>
+  {folder.data.summary && <p>{folder.data.summary}</p>}
+  <Content />
+</article>
+```
 
 ## Get the exe
 
@@ -173,7 +250,7 @@ The finished file is at `PhotoCuratorApp\bin\Release\net10.0-windows\win-x64\pub
 | `PhotoCuratorApp/` | The Windows window (WinForms + WebView2): folder picker, Show in Explorer, single-file publish settings. |
 | `PhotoCurator.Core.Tests/` | Unit and server tests (xUnit), including a small HEIC fixture. |
 | `tools/DevHost/` | Runs the real server and UI on any OS, in a browser, for development. |
-| `tools/e2e/` | Browser tests of the whole flow in Chromium (Playwright), checking the files on disk at every step. |
+| `tools/e2e/` | Browser tests of the whole flow in Chromium (Playwright), checking the files on disk at every step, and unit tests of the write-up editor's Markdown model. |
 
 ### Developing
 
@@ -183,6 +260,7 @@ dotnet run --project tools/DevHost -- --port 8790 --open ~/Pictures   # UI at th
 
 # browser tests: needs Chromium (set PLAYWRIGHT_BROWSERS_PATH, CHROMIUM, or let Playwright download one)
 dotnet build tools/DevHost && npm install --prefix tools/e2e && node tools/e2e/curator.e2e.mjs
+node --test tools/e2e/markdown.test.mjs                               # the write-up editor's Markdown model
 ```
 
 `PhotoCuratorApp` compiles anywhere (`EnableWindowsTargeting`), but the window itself only runs on Windows.

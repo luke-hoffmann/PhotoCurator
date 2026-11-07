@@ -384,6 +384,156 @@ try {
     await page.setViewportSize({ width: 1280, height: 800 });
   });
 
+  // ---------- write-ups: a folder's story, written on the page or in Markdown ----------
+
+  const ATTIC = path.join(COPY, 'Field Work', 'Attic');
+  const writeUp = path.join(ATTIC, 'folder.md');
+  const onDisk = () => exists(writeUp) ? read(writeUp) : '';
+  const expectOnDisk = (expected, what = 'the write-up on disk') =>
+    until(() => onDisk() === expected, what).catch(e => { throw new Error(`${e.message}\n--- on disk ---\n${onDisk()}--- expected ---\n${expected}`); });
+  const front = (extra = '') => `---\ntitle: Attic insulation\nsummary: Out with the old.\n${extra}---\n\n`;
+  const intro = 'We pulled 40 years of **dusty** insulation out by hand.\n\n## Demo day\n\n';
+  const a1 = '![Pulling it out](IMG_A1.jpg)';
+  const b1 = '![](Before/IMG_B1.jpg)';
+  const story = (...photos) => intro + photos.map(p => p + '\n\n').join('') + 'Suits and masks.\n\nThe end.\n';
+
+  await test('write-up: a folder has a Write-up tab next to its photos', async () => {
+    fs.mkdirSync(path.join(ATTIC, 'Before'), { recursive: true });
+    fs.writeFileSync(path.join(ATTIC, 'IMG_A1.jpg'), await makeJpeg(41, 1200, 900));
+    fs.writeFileSync(path.join(ATTIC, 'IMG_A2.jpg'), await makeJpeg(42, 900, 1200));
+    fs.writeFileSync(path.join(ATTIC, 'Before', 'IMG_B1.jpg'), await makeJpeg(43, 1200, 800));
+    await until(async () => (await page.locator('.side-row[data-folder="Field Work/Attic"]').count()) === 1, 'the new folder');
+    await page.click('.side-row[data-folder="Field Work/Attic"]');
+    await page.click('#viewTabs [data-tab="writeup"]');
+    await page.waitForSelector('#writeup:not([hidden])');
+    assert.equal(await page.isVisible('#grid'), false);
+    await until(async () => (await page.locator('.wu-thumb').count()) === 3, 'the folder\'s photos (and its subfolder\'s) in the strip');
+    assert.equal(await page.getAttribute('.story-title', 'placeholder'), 'Attic', 'the title defaults to the folder name');
+    assert.ok(!exists(writeUp), 'nothing is written before you write');
+    await shot('10-writeup-new');
+  });
+
+  await test('write-up: type the title, summary and story right on the page', async () => {
+    await page.click('.story-title');
+    await page.keyboard.type('Attic insulation');
+    await page.keyboard.press('Enter'); // on to the summary
+    await page.keyboard.type('Out with the old.');
+    await page.keyboard.press('Enter'); // on to the story
+    await page.keyboard.type('We pulled 40 years of ');
+    await page.keyboard.press('Control+b');
+    await page.keyboard.type('dusty');
+    await page.keyboard.press('Control+b');
+    await page.keyboard.type(' insulation out by hand.');
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('## Demo day'); // "## " makes a heading, like in Markdown
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('Suits and masks.');
+    await expectOnDisk(front() + intro + 'Suits and masks.\n');
+    assert.equal(await page.locator('.sb-heading .sb-text').textContent(), 'Demo day');
+    assert.equal(await page.locator('.sb-paragraph strong').textContent(), 'dusty');
+    assert.equal(await page.inputValue('.md-front textarea[aria-label="Title"]'), 'Attic insulation', 'the Markdown side follows');
+    await until(async () => (await page.locator('.side-row[data-folder="Field Work/Attic"] .has-writeup').count()) === 1, 'the sidebar to mark the folder as having a write-up');
+  });
+
+  await test('write-up: the Markdown side edits the same story', async () => {
+    await page.click('.wu-markdown');
+    await page.keyboard.press('Control+End');
+    await page.keyboard.type('\n\nThe end.');
+    await until(async () => (await page.locator('.sb-paragraph').last().textContent()) === 'The end.', 'the page to follow the Markdown');
+    await page.fill('.md-front textarea[aria-label="Summary"]', 'Out with the old.');
+    assert.equal(await page.inputValue('.story-summary'), 'Out with the old.');
+    await expectOnDisk(front() + story());
+  });
+
+  await test('write-up: drag a photo in, click another in, caption it in place', async () => {
+    const heading = page.locator('.sb-heading');
+    const box = await heading.boundingBox();
+    await page.locator('.wu-thumb[data-path="IMG_A1.jpg"]').dragTo(heading, { targetPosition: { x: 40, y: box.height - 3 } });
+    await page.waitForSelector('.sb-photo img');
+    await page.keyboard.type('Pulling it out'); // the new photo's caption has the caret
+    await page.locator('.wu-thumb[data-path="Before/IMG_B1.jpg"]').click(); // goes after the block you're in
+    await until(async () => (await page.locator('.sb-photo').count()) === 2, 'the clicked photo in the story');
+    await expectOnDisk(front() + story(a1, b1));
+    assert.deepEqual((await page.locator('.wu-thumb.used').evaluateAll(t => t.map(x => x.dataset.path))).sort(), ['Before/IMG_B1.jpg', 'IMG_A1.jpg']);
+    await until(() => page.evaluate(() => [...document.querySelectorAll('.sb-photo img')].every(i => i.complete && i.naturalWidth > 0)), 'the photos to show');
+    await page.locator('.sb-photo').first().hover();
+    await shot('11-writeup-written');
+  });
+
+  await test('write-up: move and remove photos, then undo and redo step by step', async () => {
+    const photos = page.locator('.sb-photo');
+    await photos.nth(1).hover();
+    await photos.nth(1).locator('[data-action="up"]').click();
+    await expectOnDisk(front() + story(b1, a1), 'the photo moved up');
+    await photos.first().hover();
+    await photos.first().locator('[data-action="remove"]').click();
+    await expectOnDisk(front() + story(a1), 'the photo removed');
+    assert.ok(exists(path.join(ATTIC, 'Before', 'IMG_B1.jpg')), 'removing a photo from the story never touches the photo');
+    await page.keyboard.press('Control+z');
+    await expectOnDisk(front() + story(b1, a1), 'the removal undone');
+    await page.keyboard.press('Control+z');
+    await expectOnDisk(front() + story(a1, b1), 'the move undone');
+    await page.keyboard.press('Control+Shift+z');
+    await expectOnDisk(front() + story(b1, a1), 'the move redone');
+    await page.click('#undoButton'); // the toolbar's Undo steps through the write-up too
+    await expectOnDisk(front() + story(a1, b1), 'the move undone again');
+    assert.equal(await page.locator('.sb-caption').first().textContent(), 'Pulling it out');
+  });
+
+  await test('write-up: date and cover', async () => {
+    await page.click('.wu-date .wu-chip');
+    await page.locator('.wu-date-input').fill('2024-05-01');
+    await until(async () => (await page.textContent('.wu-date .wu-chip')).includes('May 1, 2024'), 'the date chip');
+    const cover = page.locator('.wu-bar > .wu-chip');
+    assert.match(await cover.textContent(), /Auto/, 'the cover is the first photo until you pick one');
+    await cover.click();
+    await page.click('#popover .photo-pick[title="IMG_A2.jpg"]');
+    await until(async () => (await cover.textContent()).trim() === 'Cover', 'the chosen cover');
+    await expectOnDisk(front('date: 2024-05-01\ncover: IMG_A2.jpg\n') + story(a1, b1));
+  });
+
+  await test('write-up: kept when switching tabs and folders', async () => {
+    await page.click('#viewTabs [data-tab="photos"]');
+    await page.waitForSelector('#grid:not([hidden])');
+    assert.equal(await page.isVisible('#writeup'), false);
+    await page.click('#viewTabs [data-tab="writeup"]');
+    assert.equal(await page.inputValue('.story-title'), 'Attic insulation');
+    await page.click('.side-row[data-folder="Big photos"]'); // another folder opens on the same tab, with its own write-up
+    await until(async () => (await page.getAttribute('.story-title', 'placeholder')) === 'Big photos', 'the other folder');
+    assert.equal(await page.inputValue('.story-title'), '');
+    await page.click('.side-row[data-folder="Field Work/Attic"]');
+    await until(async () => (await page.inputValue('.story-title')) === 'Attic insulation', 'the write-up read back');
+    assert.equal(await page.locator('.sb-photo').count(), 2);
+    assert.ok(!exists(path.join(COPY, 'Big photos', 'folder.md')), 'looking at a folder writes nothing');
+  });
+
+  await test('write-up: Write, Split and Markdown layouts', async () => {
+    for (const layout of ['write', 'markdown', 'split']) {
+      await page.click(`.wu-bar [data-layout="${layout}"]`);
+      assert.equal(await page.isVisible('.wu-pane-visual'), layout !== 'markdown', layout);
+      assert.equal(await page.isVisible('.wu-pane-md'), layout !== 'write', layout);
+      await page.waitForTimeout(150);
+      await shot(`12-writeup-${layout}`);
+    }
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await page.waitForTimeout(300);
+    await shot('13-writeup-1080p');
+    await page.setViewportSize({ width: 1280, height: 800 });
+  });
+
+  await test('export turns the write-up into a page that uses the web photos', async () => {
+    await page.click('.side-row[data-folder="Field Work"]', { button: 'right' });
+    await page.click('#menu >> text=Export for web…');
+    await page.fill('.dialog input', SITE);
+    await page.click('.dialog button[type=submit]');
+    await page.waitForSelector('.dialog >> text=Export finished');
+    await page.click('.dialog >> text=Done');
+    assert.equal(read(path.join(SITE, 'attic', 'folder.md')),
+      '---\ntitle: Attic insulation\nsummary: Out with the old.\ndate: 2024-05-01\ncover: ./img-a2.jpg\n---\n\n' +
+      story('![Pulling it out](./img-a1.jpg)', '![](./before/img-b1.jpg)'));
+    assert.ok(exists(path.join(SITE, 'attic', 'img-a1.jpg')) && exists(path.join(SITE, 'attic', 'before', 'img-b1.jpg')));
+  });
+
   await test('the original folder was never touched', async () => {
     assert.equal(JSON.stringify(fs.readdirSync(LIBRARY, { recursive: true }).sort()), originalLayout);
   });
