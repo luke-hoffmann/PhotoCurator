@@ -22,6 +22,7 @@ public sealed partial class CuratorServer
     sealed record KeepGroup(string? Keep, List<string>? Others);
     sealed record KeepRequest(List<KeepGroup>? Groups, bool AllExact);
     sealed record IdsRequest(List<string>? Ids);
+    sealed record WriteUpRequest(string? Folder, string? Title, string? Summary, string? Date, string? Cover, string? Body);
 
     static readonly Dictionary<string, string> ImageTypes = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -74,6 +75,38 @@ public sealed partial class CuratorServer
                 _prints!.Dismiss(keys);
                 FindDuplicates(notify: false);
                 await JsonAsync(res, 200, new { message = "Marked as not duplicates", duplicates = _duplicates.Count });
+                return;
+            }
+            case ("GET", "/api/writeup"):
+            {
+                var lib = RequireLibrary();
+                var folder = context.Request.Query["folder"].FirstOrDefault() ?? "";
+                var data = lib.ReadWriteUp(folder);
+                await JsonAsync(res, 200, new
+                {
+                    folder,
+                    exists = File.Exists(Path.Combine(lib.FullPath(folder), WriteUp.FileName)),
+                    title = data.Title,
+                    summary = data.Summary,
+                    date = data.Date,
+                    cover = data.Cover,
+                    body = data.Body
+                });
+                return;
+            }
+            case ("PUT", "/api/writeup"):
+            {
+                var r = await BodyAsync<WriteUpRequest>(context);
+                var lib = RequireLibrary();
+                var result = lib.SaveWriteUp(r.Folder ?? "", new WriteUpData
+                {
+                    Title = r.Title ?? "",
+                    Summary = r.Summary ?? "",
+                    Date = r.Date,
+                    Cover = r.Cover,
+                    Body = r.Body ?? ""
+                });
+                await JsonAsync(res, 200, Done(lib, result));
                 return;
             }
             case ("POST", "/api/copy"):
@@ -261,7 +294,7 @@ public sealed partial class CuratorServer
                 sidecar = p.HasSidecar,
                 error = p.SidecarError
             }),
-            folders = snapshot.Folders.Select(f => new { path = f.Path, name = f.Name, count = f.Count, total = f.Total }),
+            folders = snapshot.Folders.Select(f => new { path = f.Path, name = f.Name, count = f.Count, total = f.Total, writeUp = f.HasWriteUp }),
             tags = snapshot.Tags.Select(t => new { name = t.Key, count = t.Value })
         };
     }

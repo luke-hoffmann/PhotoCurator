@@ -49,34 +49,9 @@ public static class Sidecar
     public static SidecarData Parse(string text)
     {
         var data = new SidecarData();
-        text = text.Replace("\r\n", "\n").TrimStart('﻿');
-
-        if (!text.StartsWith("---\n", StringComparison.Ordinal) && text != "---")
-        {
-            data.Description = text.Trim('\n');
-            return data;
-        }
-
-        var end = FindClosingFence(text, out var bodyStart);
-        if (end < 0) throw new FormatException("The front matter has no closing \"---\" line.");
-        var yaml = text[4..end];
-        data.Description = bodyStart >= text.Length ? "" : text[bodyStart..].Trim('\n');
-
-        var stream = new YamlStream();
-        try
-        {
-            stream.Load(new StringReader(yaml));
-        }
-        catch (YamlException e)
-        {
-            throw new FormatException($"The front matter isn't valid YAML: {e.Message}", e);
-        }
-        if (stream.Documents.Count == 0) return data;
-        if (stream.Documents[0].RootNode is not YamlMappingNode mapping)
-        {
-            if (stream.Documents[0].RootNode is YamlScalarNode { Value: null or "" }) return data;
-            throw new FormatException("The front matter must be a list of \"key: value\" lines.");
-        }
+        var mapping = SplitFrontMatter(text, out var body);
+        data.Description = body;
+        if (mapping is null) return data;
 
         foreach (var pair in mapping.Children)
         {
@@ -122,13 +97,7 @@ public static class Sidecar
         }
         if (data.Alt.Length > 0) mapping.Add("alt", Scalar(data.Alt));
         foreach (var pair in data.Extra) mapping.Add(pair.Key, pair.Value);
-
-        var sb = new StringBuilder("---\n");
-        if (mapping.Children.Count > 0) sb.Append(EmitYaml(mapping));
-        sb.Append("---\n");
-        var description = data.Description.Replace("\r\n", "\n").Trim('\n');
-        if (description.Length > 0) sb.Append('\n').Append(description).Append('\n');
-        return sb.ToString();
+        return Compose(mapping, data.Description);
     }
 
     /// <summary>A front-matter-only document from plain key/value pairs, e.g. an exported folder's "title:".</summary>
@@ -184,6 +153,53 @@ public static class Sidecar
             ? parsed
             : null;
 
+    /// <summary>
+    /// Splits "---" front matter from the markdown after it. Returns null (and the whole text as the body) when the file
+    /// has no front matter; throws <see cref="FormatException"/> when it has broken front matter.
+    /// </summary>
+    internal static YamlMappingNode? SplitFrontMatter(string text, out string body)
+    {
+        text = text.Replace("\r\n", "\n").TrimStart('\uFEFF');
+        if (!text.StartsWith("---\n", StringComparison.Ordinal) && text != "---")
+        {
+            body = text.Trim('\n');
+            return null;
+        }
+
+        var end = FindClosingFence(text, out var bodyStart);
+        if (end < 0) throw new FormatException("The front matter has no closing \"---\" line.");
+        var yaml = text[4..end];
+        body = bodyStart >= text.Length ? "" : text[bodyStart..].Trim('\n');
+
+        var stream = new YamlStream();
+        try
+        {
+            stream.Load(new StringReader(yaml));
+        }
+        catch (YamlException e)
+        {
+            throw new FormatException($"The front matter isn't valid YAML: {e.Message}", e);
+        }
+        if (stream.Documents.Count == 0) return null;
+        if (stream.Documents[0].RootNode is not YamlMappingNode mapping)
+        {
+            if (stream.Documents[0].RootNode is YamlScalarNode { Value: null or "" }) return null;
+            throw new FormatException("The front matter must be a list of \"key: value\" lines.");
+        }
+        return mapping;
+    }
+
+    /// <summary>"---", the front matter, "---", then the markdown body (if any).</summary>
+    internal static string Compose(YamlMappingNode mapping, string body)
+    {
+        var sb = new StringBuilder("---\n");
+        if (mapping.Children.Count > 0) sb.Append(EmitYaml(mapping));
+        sb.Append("---\n");
+        body = body.Replace("\r\n", "\n").Trim('\n');
+        if (body.Length > 0) sb.Append('\n').Append(body).Append('\n');
+        return sb.ToString();
+    }
+
     static int FindClosingFence(string text, out int bodyStart)
     {
         var pos = 4;
@@ -203,7 +219,7 @@ public static class Sidecar
         return -1;
     }
 
-    static string ScalarText(YamlNode node) => node is YamlScalarNode scalar ? (scalar.Value ?? "").Trim() : "";
+    internal static string ScalarText(YamlNode node) => node is YamlScalarNode scalar ? (scalar.Value ?? "").Trim() : "";
 
     static List<string> ReadTags(YamlNode node)
     {
@@ -222,7 +238,7 @@ public static class Sidecar
         return tags;
     }
 
-    static YamlScalarNode Scalar(string value) => new(value);
+    internal static YamlScalarNode Scalar(string value) => new(value);
 
     static string EmitYaml(YamlMappingNode mapping)
     {

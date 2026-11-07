@@ -288,6 +288,57 @@ public sealed class PhotoLibrary : IDisposable
         }
     }
 
+    /// <summary>The folder's write-up, or an empty one if it has none yet.</summary>
+    public WriteUpData ReadWriteUp(string folder)
+    {
+        var path = PathGuard.Resolve(Root, folder);
+        if (!Directory.Exists(path)) throw new CuratorException("That folder is no longer there.", 404);
+        try
+        {
+            return WriteUp.Read(path) ?? new WriteUpData();
+        }
+        catch (FormatException e)
+        {
+            throw new CuratorException($"This folder's {WriteUp.FileName} couldn't be read ({e.Message}). Fix or delete that file, then try again.", 409);
+        }
+    }
+
+    /// <summary>
+    /// Saves the folder's write-up to "folder.md". Typing in one folder's write-up folds into one undo step (per couple of
+    /// minutes), like editing a caption. Saving an empty write-up for a folder that has none writes nothing.
+    /// </summary>
+    public OperationResult SaveWriteUp(string folder, WriteUpData update)
+    {
+        lock (_sync)
+        {
+            var path = PathGuard.Resolve(Root, folder);
+            if (!Directory.Exists(path)) throw new CuratorException("That folder is no longer there.", 404);
+            var file = Path.Combine(path, WriteUp.FileName);
+            string? before = File.Exists(file) ? File.ReadAllText(file, Encoding.UTF8) : null;
+
+            WriteUpData data;
+            try { data = before is null ? new WriteUpData() : WriteUp.Parse(before); }
+            catch (FormatException e) { throw new CuratorException($"This folder's {WriteUp.FileName} couldn't be read ({e.Message}). Fix or delete that file, then try again.", 409); }
+
+            data.Title = SingleLine(update.Title);
+            data.Summary = SingleLine(update.Summary);
+            data.Date = Sidecar.NormalizeDate(update.Date);
+            data.Cover = string.IsNullOrWhiteSpace(update.Cover) ? null : update.Cover.Trim();
+            data.Body = update.Body.Replace("\r\n", "\n").Trim('\n');
+            if (before is null && data.IsEmpty) return new OperationResult("Nothing to save yet");
+
+            var after = WriteUp.Serialize(data);
+            if (after == before) return new OperationResult("Saved");
+            Sidecar.WriteText(file, after);
+            var rel = PathGuard.ToRelative(Root, path);
+            var undo = new SidecarUndo { Description = $"Edit the write-up for {DisplayFolder(rel)}", CoalesceKey = $"writeup|{rel}" };
+            undo.Changes.Add(new SidecarUndo.Change { Path = file, Before = before, After = after });
+            _undo.Push(undo);
+        }
+        Refresh();
+        return new OperationResult("Saved");
+    }
+
     public OperationResult RenameFolder(string folder, string newName)
     {
         var clean = Names.ValidateFolderName(newName);

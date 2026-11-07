@@ -15,7 +15,8 @@ public sealed record PhotoEntry(string Id, string Folder, string Name, long Size
 
 /// <param name="Count">Photos directly in this folder.</param>
 /// <param name="Total">Photos in this folder and all folders below it.</param>
-public sealed record FolderEntry(string Path, string Name, int Count, int Total);
+/// <param name="HasWriteUp">The folder has a write-up ("folder.md").</param>
+public sealed record FolderEntry(string Path, string Name, int Count, int Total, bool HasWriteUp = false);
 
 /// <summary>Everything found in one scan. Immutable; a new one replaces it after each change.</summary>
 public sealed class LibrarySnapshot
@@ -82,7 +83,7 @@ public static class Scanner
     public static LibrarySnapshot Scan(string root, SidecarCache cache)
     {
         var photos = new List<PhotoEntry>();
-        var folders = new List<(string Path, string Name, int Count)>();
+        var folders = new List<(string Path, string Name, int Count, bool WriteUp)>();
         var sidecarPaths = new HashSet<string>(PathGuard.Comparer);
         var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         var options = new EnumerationOptions { IgnoreInaccessible = true, AttributesToSkip = 0, RecurseSubdirectories = false };
@@ -124,8 +125,9 @@ public static class Scanner
                 count++;
             }
 
-            folders.Add((rel, dir.Name, count));
-            hash.AppendData(Encoding.UTF8.GetBytes($"D|{rel}\n"));
+            var writeUp = byName.TryGetValue(WriteUp.FileName, out var writeUpFile);
+            folders.Add((rel, dir.Name, count, writeUp));
+            hash.AppendData(Encoding.UTF8.GetBytes($"D|{rel}|{(writeUp ? writeUpFile!.LastWriteTimeUtc.Ticks ^ writeUpFile.Length : 0)}\n"));
 
             foreach (var sub in entries.OfType<DirectoryInfo>())
             {
@@ -152,7 +154,7 @@ public static class Scanner
         var segmentOrder = Comparer<string>.Create(CompareFolderPaths);
         var folderList = folders
             .OrderBy(f => f.Path, segmentOrder)
-            .Select(f => new FolderEntry(f.Path, f.Name, f.Count, totals[f.Path]))
+            .Select(f => new FolderEntry(f.Path, f.Name, f.Count, totals[f.Path], f.WriteUp))
             .ToList();
         photos.Sort((a, b) =>
         {

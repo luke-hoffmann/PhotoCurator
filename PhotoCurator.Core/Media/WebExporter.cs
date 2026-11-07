@@ -85,6 +85,7 @@ public static class WebExporter
         var written = 0;
         var renders = new List<(string Source, string Target, string Name)>();
         var usedPhotoSlugs = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        var photoDest = new Dictionary<string, string>(PathGuard.Comparer); // photo id → exported jpg, for write-ups
 
         foreach (var f in folders)
         {
@@ -92,9 +93,6 @@ public static class WebExporter
             var folderDest = destFolder[f.Path];
             var folderDir = Combine(dest, folderDest);
             Directory.CreateDirectory(folderDir);
-            var folderMd = PathGuard.Join(folderDest, FolderFile);
-            if (WriteIfChanged(Path.Combine(folderDir, FolderFile), Sidecar.SerializeFields(("title", f.Name)))) written++; else unchanged++;
-            manifest.Files[folderMd] = new ManifestFile { Source = f.Path };
             Reserve(usedPhotoSlugs, folderDest, "folder");
 
             foreach (var photo in snapshot.Photos.Where(p => p.Folder.Equals(f.Path, PathGuard.Comparison)))
@@ -107,6 +105,7 @@ public static class WebExporter
                 var slug = Unique(Names.Slug(Path.GetFileNameWithoutExtension(photo.Name)), usedPhotoSlugs, folderDest);
                 var jpgRel = PathGuard.Join(folderDest, slug + ".jpg");
                 var mdRel = PathGuard.Join(folderDest, slug + ".md");
+                photoDest[photo.Id] = jpgRel;
                 var photoPath = library.FullPath(photo.Id);
                 var jpgPath = Combine(dest, jpgRel);
 
@@ -127,6 +126,27 @@ public static class WebExporter
                     renders.Add((photoPath, jpgPath, photo.Id));
                 }
             }
+        }
+
+        // Each folder's folder.md: its title, or its write-up with photo links pointing at the web copies.
+        foreach (var f in folders)
+        {
+            var folderDest = destFolder[f.Path];
+            var folderMd = PathGuard.Join(folderDest, FolderFile);
+            var text = Sidecar.SerializeFields(("title", f.Name));
+            if (f.HasWriteUp)
+            {
+                try
+                {
+                    if (WriteUp.Read(PathGuard.Resolve(library.Root, f.Path)) is { } writeUp) text = ExportWriteUp(writeUp, f, folderDest, photoDest, problems);
+                }
+                catch (FormatException e)
+                {
+                    problems.Add($"{Label(f)}/{WriteUp.FileName} couldn't be read ({e.Message}), so only its title was exported.");
+                }
+            }
+            if (WriteIfChanged(Combine(dest, folderMd), text)) written++; else unchanged++;
+            manifest.Files[folderMd] = new ManifestFile { Source = f.Path };
         }
 
         var photoCount = manifest.Files.Keys.Count(k => k.EndsWith(".jpg", StringComparison.Ordinal));
@@ -164,6 +184,57 @@ public static class WebExporter
         WriteManifest(markerPath, manifest);
         return new ExportResult(dest, photoCount, written, unchanged, removed, problems);
     }
+
+    /// <summary>
+    /// A write-up for the site: photo links rewritten from the originals ("IMG_1.HEIC") to the exported web copies
+    /// ("./img-1.jpg", relative to the folder's own folder.md), the cover resolved the same way (or the story's first
+    /// photo), and the folder's name as the title if it has none. Photos that weren't exported are left out, with a note.
+    /// </summary>
+    static string ExportWriteUp(WriteUpData writeUp, FolderEntry folder, string folderDest, Dictionary<string, string> photoDest, List<string> problems)
+    {
+        string? Map(string path) =>
+            WriteUp.ResolvePhoto(folder.Path, path) is { } id && photoDest.TryGetValue(id, out var jpg) ? RelativeUrl(folderDest, jpg) : null;
+
+        var body = WriteUp.RewriteImages(writeUp.Body, image =>
+        {
+            var mapped = Map(image.Path);
+            if (mapped is null) problems.Add($"{Label(folder)}/{WriteUp.FileName}: \"{image.Path}\" isn't one of the exported photos, so it was left out of the page.");
+            return mapped;
+        });
+
+        string? cover = null;
+        if (writeUp.Cover is { } chosen)
+        {
+            cover = Map(chosen);
+            if (cover is null) problems.Add($"{Label(folder)}/{WriteUp.FileName}: the cover \"{chosen}\" isn't one of the exported photos, so the story's first photo is the cover.");
+        }
+        cover ??= WriteUp.Images(body).FirstOrDefault()?.Path;
+
+        var exported = new WriteUpData
+        {
+            Title = writeUp.Title.Length > 0 ? writeUp.Title : folder.Name,
+            Summary = writeUp.Summary,
+            Date = writeUp.Date,
+            Cover = cover,
+            Body = body
+        };
+        exported.Extra.AddRange(writeUp.Extra);
+        return WriteUp.Serialize(exported);
+    }
+
+    /// <summary>A "./"-style link from one exported folder to a file: ("a", "a/b/x.jpg") → "./b/x.jpg", ("a/c", "a/x.jpg") → "../x.jpg".</summary>
+    static string RelativeUrl(string fromFolder, string toFile)
+    {
+        var from = fromFolder.Length == 0 ? Array.Empty<string>() : fromFolder.Split('/');
+        var to = toFile.Split('/');
+        var common = 0;
+        while (common < from.Length && common < to.Length - 1 && from[common] == to[common]) common++;
+        var ups = string.Concat(Enumerable.Repeat("../", from.Length - common));
+        var rest = string.Join('/', to.Skip(common));
+        return ups.Length == 0 ? "./" + rest : ups + rest;
+    }
+
+    static string Label(FolderEntry folder) => folder.Path.Length == 0 ? folder.Name : folder.Path;
 
     static string Unique(string slug, Dictionary<string, HashSet<string>> used, string scope)
     {
