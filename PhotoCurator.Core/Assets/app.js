@@ -336,11 +336,16 @@ function viewTitle() {
 
 function renderHeader() {
   $('viewTitle').textContent = viewTitle();
+  // The tabs are always there (except in Duplicates), so the Write-up is easy to find; it needs a folder.
   const tabs = $('viewTabs');
-  tabs.hidden = state.view.kind !== 'folder';
+  const inFolder = state.view.kind === 'folder';
+  tabs.hidden = state.view.kind === 'duplicates';
   for (const tab of tabs.querySelectorAll('[data-tab]')) {
-    tab.setAttribute('aria-selected', String((state.view.tab ?? 'photos') === tab.dataset.tab));
+    tab.setAttribute('aria-selected', String((inFolder ? state.view.tab ?? 'photos' : 'photos') === tab.dataset.tab));
   }
+  const writeUpTab = tabs.querySelector('[data-tab="writeup"]');
+  writeUpTab.setAttribute('aria-disabled', String(!inFolder));
+  writeUpTab.title = inFolder ? 'The story of this folder, with its photos' : 'Pick a folder in the sidebar to write its story';
   if (isWriteUp()) {
     const n = state.list.length;
     $('viewCount').textContent = `${n.toLocaleString()} photo${n === 1 ? '' : 's'}`;
@@ -777,7 +782,8 @@ $('folderButton').addEventListener('click', event => {
     ...(recent.length ? ['separator', ...recent.map(r => ({ label: r.name, icon: 'folder', run: () => openFolder(r.path) }))] : []),
     'separator',
     { label: 'Back to the start screen', icon: 'chevronLeft', run: async () => { state.info = await get('/api/state'); showWelcome(); } },
-    { note: current ?? '' }
+    { note: current ?? '' },
+    { note: `PhotoCurator · build ${state.info?.build ?? '?'}` }
   ]);
 });
 
@@ -823,6 +829,10 @@ $('tileSize').addEventListener('input', () => {
 $('undoButton').addEventListener('click', undoButton);
 $('viewTabs').addEventListener('click', event => {
   const tab = event.target.closest('[data-tab]')?.dataset.tab;
+  if (tab === 'writeup' && state.view.kind !== 'folder') {
+    toast('Pick a folder in the sidebar first. Each folder has its own write-up.');
+    return;
+  }
   if (!tab || state.view.kind !== 'folder' || (state.view.tab ?? 'photos') === tab) return;
   setView({ ...state.view, tab });
 });

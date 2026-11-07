@@ -373,8 +373,10 @@ textarea { resize: vertical; line-height: 1.45; }
 /* ---------- toasts ---------- */
 
 /* Top right, clear of the selection bar; top left of the photo area while the photo view is open. */
-.toasts { position: fixed; right: 22px; top: 68px; z-index: 70; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; pointer-events: none; }
-.detail:not([hidden]) ~ .toasts { right: auto; left: 22px; top: 16px; align-items: flex-start; }
+/* Bottom right, clear of the toolbar and the tabs; above the selection bar while it's showing. */
+.toasts { position: fixed; right: 22px; bottom: 22px; z-index: 70; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; pointer-events: none; }
+body:has(#selectionBar:not([hidden])) .toasts { bottom: 84px; }
+.detail:not([hidden]) ~ .toasts { right: auto; left: 22px; top: 16px; bottom: auto; align-items: flex-start; }
 .toast {
   pointer-events: auto; display: flex; align-items: center; gap: 12px; max-width: 460px; padding: 10px 10px 10px 14px;
   background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--green); border-radius: 10px; box-shadow: var(--shadow);
@@ -441,6 +443,7 @@ textarea { resize: vertical; line-height: 1.45; }
   transition: background-color 150ms, color 150ms, box-shadow 150ms;
 }
 .segmented button:hover { color: var(--ink); }
+.segmented button[aria-disabled="true"] { color: var(--faint); cursor: default; }
 .segmented button[aria-selected="true"] {
   background: var(--surface); color: var(--ink);
   box-shadow: 0 1px 2px rgba(25, 28, 24, 0.14), 0 0 0 0.5px rgba(25, 28, 24, 0.08);

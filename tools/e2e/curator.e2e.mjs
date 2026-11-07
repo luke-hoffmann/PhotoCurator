@@ -403,7 +403,14 @@ try {
     fs.writeFileSync(path.join(ATTIC, 'IMG_A2.jpg'), await makeJpeg(42, 900, 1200));
     fs.writeFileSync(path.join(ATTIC, 'Before', 'IMG_B1.jpg'), await makeJpeg(43, 1200, 800));
     await until(async () => (await page.locator('.side-row[data-folder="Field Work/Attic"]').count()) === 1, 'the new folder');
+    // The tab is always in sight; outside a folder it says where to go.
+    await page.click('.side-row >> text=All photos');
+    assert.equal(await page.getAttribute('#viewTabs [data-tab="writeup"]', 'aria-disabled'), 'true');
+    await page.click('#viewTabs [data-tab="writeup"]', { force: true }); // aria-disabled, but it still explains itself
+    await page.waitForSelector('.toast >> text=Pick a folder in the sidebar first');
+    assert.equal(await page.isVisible('#writeup'), false);
     await page.click('.side-row[data-folder="Field Work/Attic"]');
+    assert.equal(await page.getAttribute('#viewTabs [data-tab="writeup"]', 'aria-disabled'), 'false');
     await page.click('#viewTabs [data-tab="writeup"]');
     await page.waitForSelector('#writeup:not([hidden])');
     assert.equal(await page.isVisible('#grid'), false);
@@ -532,6 +539,12 @@ try {
       '---\ntitle: Attic insulation\nsummary: Out with the old.\ndate: 2024-05-01\ncover: ./img-a2.jpg\n---\n\n' +
       story('![Pulling it out](./img-a1.jpg)', '![](./before/img-b1.jpg)'));
     assert.ok(exists(path.join(SITE, 'attic', 'img-a1.jpg')) && exists(path.join(SITE, 'attic', 'before', 'img-b1.jpg')));
+  });
+
+  await test('the folder menu says which build this is', async () => {
+    await page.click('#folderButton');
+    assert.match((await page.locator('#menu .menu-note').allTextContents()).join('\n'), /PhotoCurator · build \S+/);
+    await page.keyboard.press('Escape');
   });
 
   await test('the original folder was never touched', async () => {

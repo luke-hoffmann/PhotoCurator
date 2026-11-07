@@ -221,6 +221,11 @@ dotnet publish PhotoCuratorApp -c Release -r win-x64
 The finished file is at `PhotoCuratorApp\bin\Release\net10.0-windows\win-x64\publish\PhotoCurator.exe` (about
 75 MB). Copy just that one file anywhere: no .NET install, no Node.js.
 
+**Close PhotoCurator before you publish.** While it's open, Windows locks the exe, the publish fails ("being used by
+another process") and the old exe stays. To check which build you're running, click the folder name at the top left:
+the menu ends with `PhotoCurator · build <commit>`, the first 7 characters of the commit it was built from (the same
+ones GitHub Desktop shows in History).
+
 ## Requirements
 
 - Windows 10 or 11, x64.

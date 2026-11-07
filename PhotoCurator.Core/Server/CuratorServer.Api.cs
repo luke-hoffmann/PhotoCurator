@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using PhotoCurator.Core.Library;
@@ -201,6 +202,17 @@ public sealed partial class CuratorServer
         }
     }
 
+    /// <summary>Which build this is: the commit it was built from (the SDK stamps it into the version), so it's easy
+    /// to tell an old exe from a new one.</summary>
+    static readonly string Build = BuildId();
+
+    static string BuildId()
+    {
+        var version = typeof(CuratorServer).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "";
+        var plus = version.IndexOf('+');
+        return plus < 0 ? version : version[(plus + 1)..Math.Min(version.Length, plus + 8)];
+    }
+
     object State()
     {
         var lib = Library;
@@ -213,6 +225,7 @@ public sealed partial class CuratorServer
             undo = lib?.UndoDescription,
             job = _jobs.Current,
             home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            build = Build,
             separator = Path.DirectorySeparatorChar.ToString()
         };
     }
